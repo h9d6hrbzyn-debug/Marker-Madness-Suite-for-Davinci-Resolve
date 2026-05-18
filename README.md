@@ -1,3 +1,4 @@
+<img width="1767" height="2357" alt="splash" src="https://github.com/user-attachments/assets/218e3bc3-e706-4e97-87ed-2b5466b4c455" />
 [README.md](https://github.com/user-attachments/files/27972742/README.md)
 # 🎯 Marker Madness
 ### *Because your markers deserve better than chaos.*
