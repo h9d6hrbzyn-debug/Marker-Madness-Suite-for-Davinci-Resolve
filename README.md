@@ -2,7 +2,7 @@
 
 ---
 
-Four free scripting tools for DaVinci Resolve editors. No subscriptions, no nonsense, no install wizard. Drop them in your scripts folder and get to work.
+Four free scripting tools for DaVinci Resolve editors. No subscriptions, no nonsense, no install wizard. Drop them in your scripts folder and get to work. **Works with DaVinci Resolve 18+ — free version and Studio both fully supported.**
 
 **[resolve-tools.com](https://resolve-tools.com)** — screenshots, guides, and downloads for every tool.
 
@@ -142,7 +142,7 @@ Download the `.app` (macOS) or `.exe` (Windows) from [resolve-tools.com](https:/
 3. Launch DaVinci Resolve
 4. Run any tool from **Workspace → Scripts → Utility**
 
-Requires DaVinci Resolve 18+. No external Python packages needed.
+Requires DaVinci Resolve 18+. Works with the free version and Studio. No external Python packages needed.
 
 ---
 
