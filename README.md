@@ -127,7 +127,7 @@ Reel Time Plus is a running-time calculator for TV and film editors. Create name
 ### ✂️ Clipper v1.0
 *One click. Every clip. Done.*
 
-Okay, Not exactly the Avid Media Composer subclip tool! But until Blackmagic gives more control with their APIs, this is as close as we're gonna get.
+Okay, Not exactly the Avid Media Composer subclip tool! But until Blackmagic gives more control with their API, this is as close as we're gonna get.
 
 You've got a finished cut on V1 — or a selects reel on V2 — and you want every clip turned into a subclip and organized into a Media Pool bin. You could right-click each one, fill in the in/out points, name it, choose the bin... forty times. Or you could open Clipper, pick the track, pick the bin, and hit Create.
 
