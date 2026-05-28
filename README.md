@@ -78,7 +78,7 @@ Works on Media Pool clips, timelines, or both. Select what you want to rename, c
 
 ---
 
-### 🎚️ Track Command v1.0
+### 🎚️ Track Command v1.1
 *Your timeline's track names, finally under control.*
 
 A 65-track timeline where half the audio tracks are still named "Audio 1" through "Audio 65" is nobody's friend — not in exports, not in delivery, not when a client asks where the music stem is.
@@ -124,26 +124,42 @@ Reel Time Plus is a running-time calculator for TV and film editors. Create name
 
 **Fully Standalone** — Reel Time Plus runs as a native app on macOS (Intel + Apple Silicon) and Windows with no DaVinci Resolve connection required, no Python install, nothing to configure. Also available as a `.py` script for the Resolve scripts menu.
 
-### ✂️ Clipper v1.0
+### ✂️ Clipper v1.2
 *One click. Every clip. Done.*
-
-Okay, Not exactly the Avid Media Composer subclip tool! But until Blackmagic gives more control with their API, this is as close as we're gonna get.
 
 You've got a finished cut on V1 — or a selects reel on V2 — and you want every clip turned into a subclip and organized into a Media Pool bin. You could right-click each one, fill in the in/out points, name it, choose the bin... forty times. Or you could open Clipper, pick the track, pick the bin, and hit Create.
 
 Clipper reads every clip on the chosen track, calculates the exact source in/out points from the timeline, and drops a named subclip for each clip into whichever Media Pool bin you point it at — or a new one you create on the spot.
 
-**Track Selector** — Choose any video or audio track by label. The clip count is shown before you commit.
+**Track Selector** — Choose any video or audio track by label — or pick **All Tracks** to capture every clip across the entire timeline in one pass. The clip count is shown before you commit.
 
 **Destination Bin** — Pick any existing Media Pool bin from a full folder-tree dropdown, or hit + New Bin to create one without leaving the tool.
 
 **Prefix & Suffix** — Add text to the front or back of every subclip name in one pass. The live preview updates as you type.
 
+**Handles** — Add head and tail frames to every clip for VFX pulls. Shared or custom per side.
+
+**In/Out Range** — Limit clip creation to only the clips that fall within the timeline's In/Out marks.
+
+**Clip from Range** — Set an In and Out mark on the timeline, pick a track (or All Tracks), and Clipper assembles all the clips in that range into one new timeline sequence in your chosen bin. Optionally preserves clip markers.
+
 **Live Preview** — See the exact subclip name, source clip, source In TC, source Out TC, and duration for every clip on the track before creating anything. Clips that can't become subclips (generators, titles, compounds) are flagged in amber and skipped gracefully.
 
 **Auto-Disambiguate** — If two clips share a source name, they become `ClipName_01` and `ClipName_02` automatically. No collisions, no overwritten subclips.
 
+**Preserve Timeline Order** — Prepend a sort prefix so clips land in cut order in the bin regardless of source name. Two modes: **Sequential** (T01_, T02_…) or **Timecode** (01-00-44-05_…) for reliable sorting even across multiple separate runs. When All Tracks is selected, a track prefix is added automatically (V2_T03_, A1_01-00-44-05_, etc.).
+
+**Preserve Clip Markers** — Markers on original timeline clips are copied to the new subclips or sequence clips, with offsets adjusted for any head handles added.
+
+**Video Only** — Strip all audio tracks from created sequences when you only need the picture.
+
+**Abort** — Stop a running batch mid-way with one click. Clips already created are kept; the summary shows exactly what was processed and how many were not reached.
+
 **Results Summary** — After each run: how many were created, how many skipped, how many failed — with a list of any failures.
+
+> **Note:** Clipper is not the subclip tool from Avid Media Composer. The DaVinci Resolve scripting API does not support creating a single subclip that spans multiple source clips. Clipper creates one true subclip per clip on the selected track.
+>
+> **Want true standalone clips from a range?** Use *Clip from Range* to build a sequence, then open that sequence, lasso all the clips, and drag them directly into any Media Pool bin. Resolve converts each dragged clip into its own clip entry. A few extra steps, but it gets you there.
 
 ---
 
