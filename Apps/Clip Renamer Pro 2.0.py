@@ -20,6 +20,7 @@ import threading
 import subprocess
 import tkinter as tk
 from tkinter import ttk
+import webbrowser
 
 # ---------------------------------------------------------------------------
 # App icon (embedded Base64 PNG — no external file required)
@@ -330,6 +331,8 @@ class ClipRenamerPro:
         self.root.withdraw()
         self.root.title("Clip Renamer Pro")
         self.root.configure(bg=BG)
+        self.root.createcommand('::tk::mac::ShowHelp',
+            lambda: webbrowser.open("https://resolve-tools.com/clip-renamer-pro-guide"))
         self.root.resizable(False, True)
         self.root.minsize(720, 567)
         _w, _h = 720, 697

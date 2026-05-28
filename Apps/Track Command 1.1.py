@@ -20,6 +20,7 @@ import threading
 import subprocess
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+import webbrowser
 
 # ---------------------------------------------------------------------------
 # App icon (embedded Base64 PNG — no external file required)
@@ -367,6 +368,8 @@ class TrackCommander:
         self.root.withdraw()
         self.root.title("Track Command 1.1")
         self.root.configure(bg=BG)
+        self.root.createcommand('::tk::mac::ShowHelp',
+            lambda: webbrowser.open("https://resolve-tools.com/track-command-guide"))
         _w, _h = 1420, 840
         self.root.update_idletasks()
         _cx = self.root.winfo_pointerx()

@@ -19,6 +19,7 @@ import sys
 import os
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
+import webbrowser
 
 # ---------------------------------------------------------------------------
 # App icon (embedded Base64 PNG — no external file required)
@@ -253,6 +254,8 @@ class Clipper:
         self.root.withdraw()
         self.root.title("Clipper 1.2")
         self.root.configure(bg=BG)
+        self.root.createcommand('::tk::mac::ShowHelp',
+            lambda: webbrowser.open("https://resolve-tools.com/clipper-guide"))
         self.root.resizable(True, True)
         self.root.minsize(640, 560)
 

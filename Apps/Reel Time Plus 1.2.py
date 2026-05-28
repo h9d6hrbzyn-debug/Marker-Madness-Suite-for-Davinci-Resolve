@@ -26,6 +26,7 @@ import uuid
 import platform
 import tkinter as tk
 from tkinter import ttk, messagebox
+import webbrowser
 
 _IS_WINDOWS = platform.system() == "Windows"
 
@@ -812,6 +813,8 @@ class ReelTimePlus:
         self.root.withdraw()
         self.root.title("Reel Time Plus")
         self.root.configure(bg=BG)
+        self.root.createcommand('::tk::mac::ShowHelp',
+            lambda: webbrowser.open("https://resolve-tools.com/reel-time-plus-guide"))
         self.root.resizable(True, True)
         self.root.minsize(480, 520)
         w, h = 560, 740

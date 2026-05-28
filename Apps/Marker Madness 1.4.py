@@ -29,6 +29,7 @@ import threading
 import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
+import webbrowser
 
 # ---------------------------------------------------------------------------
 # App icon (embedded Base64 PNG — no external file required)
@@ -4044,6 +4045,8 @@ class MarkerMadness:
         self.root = root
         self.root.title(APP_TITLE)
         self.root.configure(bg=BG)
+        self.root.createcommand('::tk::mac::ShowHelp',
+            lambda: webbrowser.open("https://resolve-tools.com/marker-madness-guide"))
         self.root.after_idle(lambda: self.root.minsize(
             1300, max(self._side_panel.winfo_reqheight(), 750)))
 
