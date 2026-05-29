@@ -12,7 +12,7 @@ Five free scripting tools for DaVinci Resolve editors. No subscriptions, no nons
 
 ---
 
-### 🎯 Marker Madness v1.4
+### 🎯 Marker Madness v1.4.1
 *Because your markers deserve better than chaos.*
 
 You dropped a hundred markers across a timeline. Some are on clips, some are on the ruler, some are named, some aren't. You need to find the red ones, rename them all, nudge them two frames earlier, export a CSV with thumbnail frames, and do it before lunch.
@@ -33,7 +33,7 @@ Marker Madness puts every marker in your timeline — clip markers and timeline 
 
 **Promote & Demote** — Copy or move clip markers up to the timeline ruler. Copy or move timeline markers down onto a clip. Pick a frame offset and optionally change the color on the way.
 
-**Copy and Paste Across Timelines** — Select any markers, hit Copy Markers, switch to a different timeline, position your playhead, and hit Paste Markers. The earliest copied marker aligns to the playhead, all others follow at the same offsets. A dialog lets you choose where to land: the Timeline Ruler, or any video/audio track that has a clip at the paste position.
+**Copy and Paste Across Timelines — and Projects** — Select any markers, hit Copy Markers, switch to a different timeline, position your playhead, and hit Paste Markers. The earliest copied marker aligns to the playhead, all others follow at the same offsets. A dialog lets you choose where to land: the Timeline Ruler, or any video/audio track that has a clip at the paste position. The clipboard lives in memory for as long as Marker Madness stays open — so you can paste across timelines, across tracks, or even across entirely different PROJECTS. Switch projects in Resolve, bring Marker Madness back to the foreground, and paste. No CSV export, no round-trips.
 
 **Jump to Any Marker** — Select a marker and move Resolve's playhead directly to it. Toggle auto-jump to have the playhead follow your selection automatically.
 
