@@ -12,7 +12,7 @@ Five free scripting tools for DaVinci Resolve editors. No subscriptions, no nons
 
 ---
 
-### 🎯 Marker Madness v1.4.1
+### <img src="https://resolve-tools.com/images/icons/icon-marker-madness.png" width="28" style="vertical-align:middle;"> Marker Madness v1.4.1
 *Because your markers deserve better than chaos.*
 
 You dropped a hundred markers across a timeline. Some are on clips, some are on the ruler, some are named, some aren't. You need to find the red ones, rename them all, nudge them two frames earlier, export a CSV with thumbnail frames, and do it before lunch.
@@ -55,7 +55,7 @@ Marker Madness puts every marker in your timeline — clip markers and timeline 
 
 ---
 
-### ✏️ Clip Renamer Pro v2.0
+### <img src="https://resolve-tools.com/images/icons/icon-clip-renamer-pro.png" width="28" style="vertical-align:middle;"> Clip Renamer Pro v2.0
 *Batch rename without the batch headache.*
 
 You've got 200 clips in a bin that all came off camera named something like `A001C002_240318_R3D2`. You need them to say something a human can read. Or you've got a mix of cases and want everything sentence-case. Or you're adding a project code prefix to every clip before you hand off the drive.
@@ -78,7 +78,7 @@ Works on Media Pool clips, timelines, or both. Select what you want to rename, c
 
 ---
 
-### 🎚️ Track Command v1.1
+### <img src="https://resolve-tools.com/images/icons/icon-track-command.png" width="28" style="vertical-align:middle;"> Track Command v1.1
 *Your timeline's track names, finally under control.*
 
 A 65-track timeline where half the audio tracks are still named "Audio 1" through "Audio 65" is nobody's friend — not in exports, not in delivery, not when a client asks where the music stem is.
@@ -97,7 +97,7 @@ Track Command puts every audio and video track from your current timeline into a
 
 ---
 
-### ⏱️ Reel Time Plus v1.2
+### <img src="https://resolve-tools.com/images/icons/icon-reel-time-plus.png" width="28" style="vertical-align:middle;"> Reel Time Plus v1.2
 *Running time, always in frame.*
 
 You're cutting a four-act TV movie to a 1:26:30 delivery spec and you're six minutes over. You need to know which act is carrying the weight — and exactly how much you need to lose. Or you're in DI and need to confirm your total runtime including leaders clears the delivery window before you send the drive.
@@ -124,7 +124,7 @@ Reel Time Plus is a running-time calculator for TV and film editors. Create name
 
 **Fully Standalone** — Reel Time Plus runs as a native app on macOS (Intel + Apple Silicon) and Windows with no DaVinci Resolve connection required, no Python install, nothing to configure. Also available as a `.py` script for the Resolve scripts menu.
 
-### ✂️ Clipper v1.2
+### <img src="https://resolve-tools.com/images/icons/icon-clipper.png" width="28" style="vertical-align:middle;"> Clipper v1.2
 *One click. Every clip. Done.*
 
 You've got a finished cut on V1 — or a selects reel on V2 — and you want every clip turned into a subclip and organized into a Media Pool bin. You could right-click each one, fill in the in/out points, name it, choose the bin... forty times. Or you could open Clipper, pick the track, pick the bin, and hit Create.
