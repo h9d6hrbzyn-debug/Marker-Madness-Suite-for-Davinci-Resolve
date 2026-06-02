@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Marker Madness 1.4.1 — DaVinci Resolve Marker Manager
+Marker Madness 1.4.2 — DaVinci Resolve Marker Manager
 ====================================================
 A GUI tool to view, add, edit, delete, and export both timeline markers
 and clip-based markers in your current DaVinci Resolve timeline.
@@ -1132,7 +1132,8 @@ class MarkerRenamerDialog(tk.Toplevel):
 # ---------------------------------------------------------------------------
 
 def _attach_entry_menu(widget: tk.Entry):
-    """Attach a right-click Cut / Copy / Paste / Select All menu to an Entry."""
+    """Attach a right-click Cut / Copy / Paste / Select All menu to an Entry.
+    Also fixes macOS Tkinter double-paste bug and missing Cmd+A select-all."""
     menu = tk.Menu(widget, tearoff=0)
     menu.add_command(label="Cut",        command=lambda: widget.event_generate("<<Cut>>"))
     menu.add_command(label="Copy",       command=lambda: widget.event_generate("<<Copy>>"))
@@ -1147,8 +1148,40 @@ def _attach_entry_menu(widget: tk.Entry):
         finally:
             menu.grab_release()
 
-    widget.bind("<Button-2>", _show)
-    widget.bind("<Button-3>", _show)
+    # macOS: <<Paste>> fires multiple times per Cmd+V (Tkinter + AppKit layers).
+    # Debounce within 150ms so only the first event actually pastes.
+    import time as _time
+    _last_paste = [0.0]
+
+    def _paste_once(event):
+        now = _time.time()
+        if now - _last_paste[0] < 0.15:
+            return "break"
+        _last_paste[0] = now
+        w = event.widget
+        try:
+            text = w.selection_get(selection="CLIPBOARD")
+        except tk.TclError:
+            return "break"
+        try:
+            w.delete("sel.first", "sel.last")
+        except tk.TclError:
+            pass
+        w.insert(tk.INSERT, text)
+        return "break"
+
+    # macOS: Cmd+A not wired to select-all by default in Tkinter Entry widgets.
+    def _select_all(event):
+        w = event.widget
+        w.focus_set()
+        w.select_range(0, "end")
+        return "break"
+
+    widget.bind("<<Paste>>",   _paste_once)
+    widget.bind("<Command-a>", _select_all)
+    widget.bind("<Command-A>", _select_all)
+    widget.bind("<Button-2>",  _show)
+    widget.bind("<Button-3>",  _show)
 
 # ---------------------------------------------------------------------------
 
@@ -1284,6 +1317,7 @@ class MarkerDialog(tk.Toplevel):
                  bg=DFLD, fg=TEXT, insertbackground=TEXT,
                  relief="flat", font=F_MAIN)
         self._name_entry.grid(row=name_row, column=1, sticky="ew", **pad)
+        _attach_entry_menu(self._name_entry)
 
         # ── Note ──────────────────────────────────────────────────────────
         self._note_text = tk.Text(self, width=36, height=4,
@@ -1308,6 +1342,16 @@ class MarkerDialog(tk.Toplevel):
         self.columnconfigure(1, weight=1)
         self.bind("<Return>",   lambda _: self._save())
         self.bind("<KP_Enter>", lambda _: self._save())
+
+        # Cmd+A: select all in whichever Entry currently has focus
+        # Bind both cases — Caps Lock makes Tkinter see <Command-A> not <Command-a>
+        def _dialog_select_all(e):
+            fw = self.focus_get()
+            if isinstance(fw, tk.Entry):
+                fw.select_range(0, "end")
+            return "break"
+        self.bind("<Command-a>", _dialog_select_all)
+        self.bind("<Command-A>", _dialog_select_all)
 
         center_on_parent(self, parent)
         self.deiconify()
@@ -4038,7 +4082,7 @@ class ExportFrameOptionsDialog(tk.Toplevel):
 # ---------------------------------------------------------------------------
 
 APP_TITLE   = "Marker Madness"
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.4.2"
 
 class MarkerMadness:
     def __init__(self, root: tk.Tk):
