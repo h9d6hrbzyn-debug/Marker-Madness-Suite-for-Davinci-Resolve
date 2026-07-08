@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Marker Madness 1.4.2 — DaVinci Resolve Marker Manager
+Marker Madness 1.4.3 — DaVinci Resolve Marker Manager
 ====================================================
 A GUI tool to view, add, edit, delete, and export both timeline markers
 and clip-based markers in your current DaVinci Resolve timeline.
@@ -4082,7 +4082,7 @@ class ExportFrameOptionsDialog(tk.Toplevel):
 # ---------------------------------------------------------------------------
 
 APP_TITLE   = "Marker Madness"
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.4.3"
 
 class MarkerMadness:
     def __init__(self, root: tk.Tk):
@@ -4091,8 +4091,12 @@ class MarkerMadness:
         self.root.configure(bg=BG)
         self.root.createcommand('::tk::mac::ShowHelp',
             lambda: webbrowser.open("https://resolve-tools.com/marker-madness-guide"))
+        # Cap the enforced minimum to the screen so small displays never get
+        # a window taller/wider than they can show (crushes the bottom row).
         self.root.after_idle(lambda: self.root.minsize(
-            1300, max(self._side_panel.winfo_reqheight(), 750)))
+            min(1300, self.root.winfo_screenwidth() - 80),
+            min(max(self._side_panel.winfo_reqheight(), 750),
+                self.root.winfo_screenheight() - 120)))
 
         self._resolve      = None
         self._project      = None
@@ -7996,11 +8000,13 @@ def main():
             saved_geom = ""
     if not saved_geom:
         root.update_idletasks()
-        w, h  = 1560, 920
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        w     = min(1560, sw - 60)
+        h     = min(920, sh - 120)   # leave room for menu bar and Dock
         px    = root.winfo_pointerx()
         py    = root.winfo_pointery()
-        x     = px - w // 2
-        y     = max(py - int(h * 0.38), 40)
+        x     = min(max(0, px - w // 2), max(0, sw - w))
+        y     = min(max(py - int(h * 0.38), 40), max(40, sh - h - 40))
         root.geometry(f"{w}x{h}+{x}+{y}")
 
     root.deiconify()                 # reveal at the correct position
