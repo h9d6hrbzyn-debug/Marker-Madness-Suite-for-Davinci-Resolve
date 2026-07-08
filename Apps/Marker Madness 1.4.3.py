@@ -4096,7 +4096,7 @@ class MarkerMadness:
         self.root.after_idle(lambda: self.root.minsize(
             min(1300, self.root.winfo_screenwidth() - 80),
             min(max(self._side_panel.winfo_reqheight(), 750),
-                self.root.winfo_screenheight() - 120)))
+                self.root.winfo_screenheight() - 100)))
 
         self._resolve      = None
         self._project      = None
@@ -8002,12 +8002,31 @@ def main():
         root.update_idletasks()
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
         w     = min(1560, sw - 60)
-        h     = min(920, sh - 120)   # leave room for menu bar and Dock
+        h     = min(920, sh - 100)   # leave room for menu bar and Dock
         px    = root.winfo_pointerx()
         py    = root.winfo_pointery()
         x     = min(max(0, px - w // 2), max(0, sw - w))
-        y     = min(max(py - int(h * 0.38), 40), max(40, sh - h - 40))
+        y     = min(max(py - int(h * 0.38), 28), max(28, sh - h - 40))
         root.geometry(f"{w}x{h}+{x}+{y}")
+
+        def _grow_to_fit():
+            # The side panel's real required height varies with font
+            # rendering, so measure after the first draw: if the panel got
+            # less height than it asked for, grow the window by the
+            # shortfall (screen permitting) and re-anchor so the bottom
+            # edge stays on screen.
+            try:
+                short = (app._side_panel.winfo_reqheight()
+                         - app._side_panel.winfo_height())
+                if short <= 0:
+                    return
+                new_h = min(root.winfo_height() + short + 4, sh - 80)
+                new_y = max(28, min(root.winfo_y(), sh - new_h - 40))
+                root.geometry(f"{root.winfo_width()}x{new_h}"
+                              f"+{root.winfo_x()}+{new_y}")
+            except Exception:
+                pass
+        root.after(250, _grow_to_fit)
 
     root.deiconify()                 # reveal at the correct position
     root.mainloop()
