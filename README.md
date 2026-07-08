@@ -179,7 +179,7 @@ Download the `.app` (macOS) or `.exe` (Windows) from [resolve-tools.com](https:/
 3. Launch DaVinci Resolve
 4. Run any tool from **Workspace → Scripts → Utility**
 
-Requires DaVinci Resolve 18+. Works with the free version and Studio. No external Python packages needed.
+**Requirements:** DaVinci Resolve 18+ (free version and Studio both fully supported) and **Python 3** — Resolve only runs `.py` scripts if Python 3 is installed on your machine. Download the free installer from [python.org/downloads](https://www.python.org/downloads/), or if you'd rather get it through Resolve directly, open the Resolve console (**Workspace → Console**) — when Python isn't detected, Resolve shows a link to the same Python 3 download. No external Python packages needed beyond that — the tools use only what ships with Python.
 
 ---
 
