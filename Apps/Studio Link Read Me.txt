@@ -1,0 +1,41 @@
+STUDIO LINK 1.0 — Modify Studio → DaVinci Resolve live bridge
+Part of the Marker Madness suite
+
+WHAT IT DOES
+Watches Modify Studio's generation jobs and imports each completed image,
+video, or audio file straight into a "MODIFY STUDIO" bin in your current
+Resolve project — sorted into Images / Video / Audio sub-bins, within
+seconds of the generation finishing. Generate on one monitor, cut on the
+other. It never touches your timeline; it only stocks bins.
+
+REQUIREMENTS
+• Modify Studio running locally (port 8766, or the porter on 8765)
+• DaVinci Resolve with an open project
+
+INSTALL
+Copy "Studio Link 1.0.py" into your Resolve scripts folder, then run it
+from Workspace > Scripts > Utility inside Resolve.
+
+macOS:   /Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/
+Windows: C:\ProgramData\Blackmagic Design\DaVinci Resolve\Fusion\Scripts\Utility\
+
+USE
+• Auto-Import (on by default): anything you generate while the link is
+  open lands in the media pool automatically.
+• Generations from before you opened the link are NOT auto-imported —
+  press "Import All Now" to pull everything Studio currently remembers.
+  (Note: Studio's job list resets when the Studio app restarts.)
+• Kind checkboxes filter what auto-imports (Images / Video / Audio).
+• Status lights: ● Studio (API reachable) and ● Resolve (scripting
+  connected). If Studio is red, launch Modify Studio — the link
+  reconnects on its own.
+
+DUPLICATE SAFETY
+Studio Link remembers what it has imported per Resolve project (state
+kept in ~/.modify_studio_link_state.json), so re-running it never
+double-imports. Delete that file to reset the memory.
+
+KNOWN LIMITS (1.0)
+• One-way: Studio → Resolve. No timeline placement, by design.
+• Files must be fully written before import; clips still uploading from
+  a slow generation show "waiting on file" and import on the next pass.
