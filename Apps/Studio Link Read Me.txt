@@ -1,4 +1,4 @@
-STUDIO LINK 1.0 — Modify Studio → DaVinci Resolve live bridge
+STUDIO LINK 1.1 — Modify Studio → DaVinci Resolve live bridge
 Part of the Marker Madness suite
 
 WHAT IT DOES
@@ -9,11 +9,14 @@ seconds of the generation finishing. Generate on one monitor, cut on the
 other. It never touches your timeline; it only stocks bins.
 
 REQUIREMENTS
-• Modify Studio running locally (port 8766, or the porter on 8765)
+• Modify Studio running locally (8766/8765) OR on the QNAP
+  (192.168.1.45:8790). For QNAP use, mount the share first:
+  Finder > Go > Connect to Server > smb://192.168.1.45/ModifyStudio
+  (imports resolve through /Volumes/ModifyStudio)
 • DaVinci Resolve with an open project
 
 INSTALL
-Copy "Studio Link 1.0.py" into your Resolve scripts folder, then run it
+Copy "Studio Link 1.1.py" into your Resolve scripts folder, then run it
 from Workspace > Scripts > Utility inside Resolve.
 
 macOS:   /Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-Studio Link 1.0 — Modify Studio → DaVinci Resolve live bridge
+Studio Link 1.1 — Modify Studio → DaVinci Resolve live bridge
+
+1.1: QNAP-aware — polls the NAS container (192.168.1.45:8790) as well as
+localhost, and translates container paths (/data/...) to the SMB mount
+(/Volumes/ModifyStudio/...) so imports resolve on this machine.
 
 Watches Modify Studio's generation jobs (localhost API) and imports each
 completed image / video / audio file straight into a "MODIFY STUDIO" bin
@@ -42,11 +46,28 @@ import tkinter as tk
 # ---------------------------------------------------------------------------
 
 STUDIO_URLS = [
-    "http://127.0.0.1:8766",   # studio engine (run.sh default)
-    "http://127.0.0.1:8765",   # porter proxy fallback
+    "http://127.0.0.1:8766",     # studio engine on this machine (run.sh default)
+    "http://127.0.0.1:8765",     # porter proxy fallback
+    "http://192.168.1.45:8790",  # QNAP container (CPW-NAS) over the LAN
 ]
 POLL_SECONDS = 4
 STATE_FILE = os.path.expanduser("~/.modify_studio_link_state.json")
+
+# Server-side path -> this-machine path. When Studio runs on the QNAP its
+# jobs report container paths (/data/...); this machine sees those files
+# through the SMB mount. First matching prefix wins; localhost jobs whose
+# paths already exist locally are imported as-is.
+PATH_MAP = {
+    "/data/": "/Volumes/ModifyStudio/",
+}
+
+
+def localize(path):
+    """Translate a server-reported file path into one this machine can read."""
+    for remote, local in PATH_MAP.items():
+        if path.startswith(remote):
+            return local + path[len(remote):]
+    return path
 
 # job kind -> sub-bin name
 KIND_BINS = {
@@ -214,7 +235,7 @@ class StudioLink:
         self.stop_flag = threading.Event()
 
         self.root = tk.Tk()
-        self.root.title("Studio Link 1.0")
+        self.root.title("Studio Link 1.1")
         self.root.configure(bg=BG)
         self.root.geometry("420x430")
         self.root.attributes("-topmost", True)
@@ -234,7 +255,7 @@ class StudioLink:
     def _build_ui(self):
         title = tk.Frame(self.root, bg=TITLE_BG)
         title.pack(fill="x")
-        tk.Label(title, text="STUDIO LINK", bg=TITLE_BG, fg=ACCENT,
+        tk.Label(title, text="STUDIO LINK 1.1", bg=TITLE_BG, fg=ACCENT,
                  font=F_BOLD, pady=6).pack(side="left", padx=10)
         self.lbl_studio = tk.Label(title, text="● Studio", bg=TITLE_BG,
                                    fg=DIM, font=F_SMALL)
@@ -398,9 +419,10 @@ class StudioLink:
 
         fresh = []
         for p in paths:
+            p = localize(p)   # QNAP container paths -> local SMB mount
             if p in done:
                 continue
-            # iCloud safety: only import fully-materialized files
+            # iCloud/SMB safety: only import fully-materialized files
             if not (os.path.isfile(p) and os.path.getsize(p) > 0):
                 self._log(f"… waiting on file: {os.path.basename(p)}")
                 continue
