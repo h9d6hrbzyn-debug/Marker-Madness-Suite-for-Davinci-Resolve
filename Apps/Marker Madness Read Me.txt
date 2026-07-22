@@ -1,4 +1,4 @@
-Marker Madness v1.4.4
+Marker Madness v1.4.5
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -9,6 +9,11 @@ Add, edit, search, filter, color-code, and bulk-edit markers from a
 single panel. Export to HTML or CSV, detect shot changes between two
 exports, and exchange markers bidirectionally with Premiere Pro and
 Avid Media Composer.
+
+WHAT'S NEW IN 1.4.5
+- New Copy→Track / Move→Track — transfer clip markers straight from
+  one track to another (e.g. V1 → V4), with the same track picker,
+  offset and color options, conflict skipping, and full undo/redo
 
 WHAT'S NEW IN 1.4.4
 - New Track filter — filter the marker table by track (V1, V2, A1…)
@@ -26,7 +31,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Marker Madness 1.4.4.py" to:
+1. Copy "Marker Madness 1.4.5.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -36,7 +41,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Marker Madness 1.4.4
+   Workspace → Scripts → Utility → Marker Madness 1.4.5
 
 FULL DOCUMENTATION
    resolve-tools.com/marker-madness-guide

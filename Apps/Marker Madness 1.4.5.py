@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Marker Madness 1.4.4 — DaVinci Resolve Marker Manager
+Marker Madness 1.4.5 — DaVinci Resolve Marker Manager
 ====================================================
 A GUI tool to view, add, edit, delete, and export both timeline markers
 and clip-based markers in your current DaVinci Resolve timeline.
@@ -4082,7 +4082,7 @@ class ExportFrameOptionsDialog(tk.Toplevel):
 # ---------------------------------------------------------------------------
 
 APP_TITLE   = "Marker Madness"
-APP_VERSION = "1.4.4"
+APP_VERSION = "1.4.5"
 
 class MarkerMadness:
     def __init__(self, root: tk.Tk):
@@ -4375,6 +4375,10 @@ class MarkerMadness:
                                    command=lambda: self._demote(move=False),
                                    bg=PURPLE, fg=BG)
         self._btn_copy_clip.pack(fill="x")
+        self._btn_copy_track = TBtn(copy_col, text="⇄ Copy→Track",
+                                    command=lambda: self._transfer_track(move=False),
+                                    bg=PURPLE, fg=BG)
+        self._btn_copy_track.pack(fill="x", pady=(2, 0))
 
         # Move column
         move_col = tk.Frame(transfer_frame, bg=BG)
@@ -4387,6 +4391,10 @@ class MarkerMadness:
                                    command=lambda: self._demote(move=True),
                                    bg=PURPLE, fg=BG)
         self._btn_move_clip.pack(fill="x")
+        self._btn_move_track = TBtn(move_col, text="⇄ Move→Track",
+                                    command=lambda: self._transfer_track(move=True),
+                                    bg=PURPLE, fg=BG)
+        self._btn_move_track.pack(fill="x", pady=(2, 0))
 
         # Nudge section
         tk.Frame(tb1, bg=BTN_HOV, width=1).pack(side="left", fill="y", padx=8)
@@ -6786,6 +6794,121 @@ class MarkerMadness:
             msg += f"\nFailed: {failed}"
         self._mb(messagebox.showinfo, f"{action} Complete", msg)
 
+    # ── Transfer: copy / move clip markers to another track ──────────────
+
+    def _transfer_track(self, move: bool):
+        """Copy or move selected clip markers onto the clip at the same
+        timeline position in another track (e.g. V1 → V4)."""
+        sel = self._tree.selection()
+        clips = [self._by_id[iid] for iid in sel
+                 if self._by_id.get(iid, {}).get("type") == "Clip"]
+        if not clips:
+            self._mb(messagebox.showinfo, "Copy to Track",
+                     "Select one or more clip markers first.")
+            return
+
+        timeline, err = self._fresh_timeline()
+        if not timeline:
+            self._mb(messagebox.showwarning, "Not connected", err)
+            return
+
+        tl_frames = {r["timeline_frame"] for r in clips}
+        available_tracks = self._get_tracks_at_frames(timeline, tl_frames)
+        if not available_tracks:
+            self._mb(messagebox.showwarning, "No Clips Found",
+                "No track has a clip at the selected marker positions.")
+            return
+
+        dlg = TrackPickDialog(self.root, available_tracks)
+        self.root.wait_window(dlg)
+        if dlg.result is None:
+            return
+        chosen_type, chosen_idx, frame_offset, chosen_color = dlg.result
+
+        action = "Moving" if move else "Copying"
+        added = skipped = failed = 0
+        undo_batch = []
+
+        for rec in clips:
+            tl_frame   = rec["timeline_frame"]
+            same_track = (rec["track_type"] == chosen_type
+                          and rec["track_index"] == chosen_idx)
+            if same_track and frame_offset == 0:
+                skipped += 1          # would land on top of itself
+                continue
+
+            item = self._find_clip_at_frame(timeline, tl_frame,
+                                            track_type=chosen_type,
+                                            track_index=chosen_idx)
+            if item is None:
+                skipped += 1
+                continue
+
+            try:
+                left_offset = item.GetLeftOffset() or 0
+            except Exception:
+                left_offset = 0
+
+            clip_offset = (tl_frame + self._start_frame - item.GetStart()) + left_offset
+            if frame_offset != 0:
+                try:
+                    clip_dur        = item.GetDuration()
+                    frames_from_in  = clip_offset - left_offset
+                    frames_from_in  = max(0, min(frames_from_in + frame_offset,
+                                                  clip_dur - 1))
+                    clip_offset     = left_offset + frames_from_in
+                except Exception:
+                    clip_offset = max(left_offset, clip_offset + frame_offset)
+
+            try:
+                existing = item.GetMarkers() or {}
+            except Exception:
+                existing = {}
+            if clip_offset in existing:
+                skipped += 1
+                continue
+
+            use_color = rec["color"] if chosen_color == "Original" else chosen_color
+            # Fallback chain: computed offset → left_offset → 0
+            # (generator clips may have unreliable GetLeftOffset())
+            ok = False; _err = ""; used_frame = clip_offset
+            for _fid in [clip_offset, left_offset, 0]:
+                ok, _err = self._resolve_add_marker(
+                    item, _fid, use_color, rec["name"],
+                    rec["note"], rec["duration"], ""
+                )
+                if ok:
+                    used_frame = _fid
+                    break
+            if ok:
+                added += 1
+                undo_batch.append(("track_xfer", chosen_type, chosen_idx,
+                                   used_frame, move, rec["track_type"],
+                                   rec["track_index"], rec["marker_frame"],
+                                   tl_frame, rec, use_color))
+                if move:
+                    src_item = rec.get("timeline_item") or self._find_clip_at_frame(
+                        timeline, tl_frame,
+                        rec.get("track_type") or None,
+                        rec.get("track_index") or None,
+                        rec.get("clip_name") or None)
+                    if src_item:
+                        self._resolve_delete_marker(src_item, rec["marker_frame"])
+            else:
+                failed += 1
+
+        if undo_batch:
+            self._push_main_undo("track_xfer", undo_batch)
+
+        self._refresh()
+        track_label = f"{'V' if chosen_type == 'video' else 'A'}{chosen_idx}"
+        msg = f"{action} complete  →  Track {track_label}\n\nAdded to clip: {added}"
+        if skipped:
+            msg += f"\nSkipped (no clip / conflict / same track): {skipped}"
+        if failed:
+            msg += f"\nFailed: {failed}"
+        self._mb(messagebox.showinfo, f"{action} Complete", msg)
+
     # ── Nudge markers ─────────────────────────────────────────────────────
 
     def _nudge_markers(self):
@@ -6961,6 +7084,26 @@ class MarkerMadness:
                     )
                 redo_batch.append(entry)
 
+        elif op_type == "track_xfer":
+            for entry in batch:
+                (_, dst_type, dst_idx, dst_offset, was_move,
+                 src_type, src_idx, src_offset, tl_frame, rec, _use_color) = entry
+                # Remove the transferred marker from the destination clip
+                dst = self._find_clip_at_frame(timeline, tl_frame, dst_type, dst_idx)
+                if dst:
+                    self._resolve_delete_marker(dst, dst_offset)
+                if was_move:
+                    # Restore the original on the source clip
+                    src = self._find_clip_at_frame(
+                        timeline, tl_frame, src_type, src_idx,
+                        rec.get("clip_name") or None)
+                    if src:
+                        self._resolve_add_marker(
+                            src, src_offset, rec["color"], rec["name"],
+                            rec["note"], rec["duration"], ""
+                        )
+                redo_batch.append(entry)
+
         elif op_type == "add_timeline":
             for entry in batch:
                 obj, frame_id = entry[0], entry[1]
@@ -7042,6 +7185,28 @@ class MarkerMadness:
                 if ok:
                     if was_move and clip_item:
                         self._resolve_delete_marker(clip_item, clip_mf)
+                    undo_batch.append(entry)
+
+        elif op_type == "track_xfer":
+            # Re-do transfer: add marker on destination clip, if was_move
+            # delete it from the source clip again
+            for entry in batch:
+                (_, dst_type, dst_idx, dst_offset, was_move,
+                 src_type, src_idx, src_offset, tl_frame, rec, use_color) = entry
+                dst = self._find_clip_at_frame(timeline, tl_frame, dst_type, dst_idx)
+                if dst is None:
+                    continue
+                ok, _ = self._resolve_add_marker(
+                    dst, dst_offset, use_color, rec["name"],
+                    rec["note"], rec["duration"], ""
+                )
+                if ok:
+                    if was_move:
+                        src = self._find_clip_at_frame(
+                            timeline, tl_frame, src_type, src_idx,
+                            rec.get("clip_name") or None)
+                        if src:
+                            self._resolve_delete_marker(src, src_offset)
                     undo_batch.append(entry)
 
         elif op_type == "add_timeline":

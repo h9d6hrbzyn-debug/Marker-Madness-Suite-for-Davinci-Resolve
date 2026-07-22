@@ -12,7 +12,7 @@ Five free scripting tools for DaVinci Resolve editors. No subscriptions, no nons
 
 ---
 
-### <img src="https://resolve-tools.com/images/icons/icon-marker-madness.png" width="28" style="vertical-align:middle;"> Marker Madness v1.4.4
+### <img src="https://resolve-tools.com/images/icons/icon-marker-madness.png" width="28" style="vertical-align:middle;"> Marker Madness v1.4.5
 *Because your markers deserve better than chaos.*
 
 You dropped a hundred markers across a timeline. Some are on clips, some are on the ruler, some are named, some aren't. You need to find the red ones, rename them all, nudge them two frames earlier, export a CSV with thumbnail frames, and do it before lunch.
