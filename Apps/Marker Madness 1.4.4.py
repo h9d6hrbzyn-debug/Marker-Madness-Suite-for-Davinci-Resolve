@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Marker Madness 1.4.3 — DaVinci Resolve Marker Manager
+Marker Madness 1.4.4 — DaVinci Resolve Marker Manager
 ====================================================
 A GUI tool to view, add, edit, delete, and export both timeline markers
 and clip-based markers in your current DaVinci Resolve timeline.
@@ -4082,7 +4082,7 @@ class ExportFrameOptionsDialog(tk.Toplevel):
 # ---------------------------------------------------------------------------
 
 APP_TITLE   = "Marker Madness"
-APP_VERSION = "1.4.3"
+APP_VERSION = "1.4.4"
 
 class MarkerMadness:
     def __init__(self, root: tk.Tk):
@@ -4423,6 +4423,13 @@ class MarkerMadness:
                      values=["All Types", "Timeline", "Clip"],
                      state="readonly", width=11).pack(side="left")
         self._filter_type.trace_add("write", lambda *_: self._populate_table())
+
+        tk.Label(tb2, text="Track:", fg=TEXT, bg=BG, font=F_SMALL).pack(side="left", padx=(16, 3))
+        self._filter_track = tk.StringVar(value="All Tracks")
+        self._track_cb = ttk.Combobox(tb2, textvariable=self._filter_track,
+                                      values=["All Tracks"], state="readonly", width=9)
+        self._track_cb.pack(side="left")
+        self._filter_track.trace_add("write", lambda *_: self._populate_table())
 
         # Search field
         tk.Label(tb2, text="🔍 Search:", fg=TEXT, bg=BG, font=F_SMALL).pack(side="left", padx=(16, 3))
@@ -4955,6 +4962,8 @@ class MarkerMadness:
     def _reset_filters(self):
         self._filter_color.set("All")
         self._filter_type.set("All Types")
+        if hasattr(self, "_filter_track"):
+            self._filter_track.set("All Tracks")
 
     def _start_timeline_poll(self):
         """Poll Resolve every 4 seconds and auto-refresh if the timeline has changed."""
@@ -5130,6 +5139,7 @@ class MarkerMadness:
 
         self._all_markers = markers
         self._by_id       = {r["id"]: r for r in markers}
+        self._refresh_track_filter_values()
         self._populate_table()
 
     def _make_record(self, *, mtype, timeline_frame, marker_frame,
@@ -5181,6 +5191,35 @@ class MarkerMadness:
         self._filter_color.set("All")
         self._populate_table()
 
+    # ── Track filter helpers ──────────────────────────────────────────────
+
+    @staticmethod
+    def _track_label(rec):
+        """'Ruler' for timeline markers, else V#/A# from the record's track."""
+        if rec["type"] == "Timeline":
+            return "Ruler"
+        prefix = "V" if rec["track_type"] == "video" else "A"
+        return f"{prefix}{rec['track_index']}"
+
+    def _track_filter_ok(self, rec, track_f):
+        return track_f == "All Tracks" or self._track_label(rec) == track_f
+
+    def _refresh_track_filter_values(self):
+        """Rebuild the Track dropdown from whatever is actually loaded."""
+        if not hasattr(self, "_track_cb"):
+            return
+        vids = sorted({r["track_index"] for r in self._all_markers
+                       if r["type"] == "Clip" and r["track_type"] == "video"})
+        auds = sorted({r["track_index"] for r in self._all_markers
+                       if r["type"] == "Clip" and r["track_type"] == "audio"})
+        values = ["All Tracks"]
+        if any(r["type"] == "Timeline" for r in self._all_markers):
+            values.append("Ruler")
+        values += [f"V{i}" for i in vids] + [f"A{i}" for i in auds]
+        self._track_cb.config(values=values)
+        if self._filter_track.get() not in values:
+            self._filter_track.set("All Tracks")
+
     # ── Table population ──────────────────────────────────────────────────
 
     def _on_sort_column(self, col_id):
@@ -5206,6 +5245,7 @@ class MarkerMadness:
 
         color_f  = self._filter_color.get()
         type_f   = self._filter_type.get()
+        track_f  = self._filter_track.get() if hasattr(self, "_filter_track") else "All Tracks"
         search_f = self._search_var.get().strip().lower()
         shown    = 0
 
@@ -5221,6 +5261,8 @@ class MarkerMadness:
             if type_f == "Timeline" and rec["type"] != "Timeline":
                 continue
             if type_f == "Clip" and rec["type"] != "Clip":
+                continue
+            if not self._track_filter_ok(rec, track_f):
                 continue
             if search_f:
                 haystack = " ".join([
@@ -5804,13 +5846,27 @@ class MarkerMadness:
             return ok, err
 
         else:
-            # Clip marker — re-scan tracks for a fresh item proxy
+            # Clip marker — re-scan for a fresh item proxy on the marker's
+            # OWN track. A bare frame scan returns the lowest track's clip,
+            # which rewrote V2/V3 markers onto V1 as duplicates.
             tl_frame     = rec["timeline_frame"]
             marker_frame = rec["marker_frame"]
-            target_item  = self._find_clip_at_frame(timeline, tl_frame)
+            ttype        = rec.get("track_type") or None
+            tidx         = rec.get("track_index") or None
+            cname        = rec.get("clip_name") or None
+            target_item  = self._find_clip_at_frame(timeline, tl_frame,
+                                                    ttype, tidx, cname)
+            if target_item is None and cname:
+                # Edit may have moved since load — search every track for
+                # the same-named clip before giving up.
+                target_item = self._find_clip_at_frame(timeline, tl_frame,
+                                                       clip_name=cname)
             if target_item is None:
+                where = (f"{'V' if ttype == 'video' else 'A'}{tidx}"
+                         if ttype and tidx else f"timeline frame {tl_frame}")
                 return False, (
-                    f"No clip found at timeline frame {tl_frame}. "
+                    f"Couldn't find this marker's clip"
+                    f"{' (' + cname + ')' if cname else ''} on {where}. "
                     "Try Refresh and retry."
                 )
             self._resolve_delete_marker(target_item, marker_frame)
@@ -5821,9 +5877,11 @@ class MarkerMadness:
                 rec["timeline_item"] = target_item
             return ok, err
 
-    def _find_clip_at_frame(self, timeline, tl_frame, track_type=None, track_index=None):
+    def _find_clip_at_frame(self, timeline, tl_frame, track_type=None, track_index=None,
+                            clip_name=None):
         """Return the first TimelineItem spanning tl_frame.
-        If track_type and track_index are given, only that track is searched."""
+        If track_type and track_index are given, only that track is searched.
+        If clip_name is given, only an item with that exact name matches."""
         try:
             types = [track_type] if track_type else ["video", "audio"]
             for ttype in types:
@@ -5836,8 +5894,11 @@ class MarkerMadness:
                     for item in items:
                         try:
                             abs_frame = tl_frame + self._start_frame
-                            if item.GetStart() <= abs_frame < item.GetEnd():
-                                return item
+                            if not (item.GetStart() <= abs_frame < item.GetEnd()):
+                                continue
+                            if clip_name and item.GetName() != clip_name:
+                                continue
+                            return item
                         except Exception:
                             continue
         except Exception:
@@ -6465,7 +6526,11 @@ class MarkerMadness:
                 # which track (video or audio) owns this marker.
                 item = rec.get("timeline_item")
                 if item is None:
-                    item = self._find_clip_at_frame(timeline, rec["timeline_frame"])
+                    item = self._find_clip_at_frame(
+                        timeline, rec["timeline_frame"],
+                        rec.get("track_type") or None,
+                        rec.get("track_index") or None,
+                        rec.get("clip_name") or None)
                 if item:
                     existing = {}
                     try:
@@ -6490,10 +6555,12 @@ class MarkerMadness:
             return
         color_f = self._filter_color.get()
         type_f  = self._filter_type.get()
+        track_f = self._filter_track.get() if hasattr(self, "_filter_track") else "All Tracks"
         targets = [
             r for r in self._all_markers
             if (color_f == "All" or r["color"] == color_f)
             and (type_f == "All Types" or r["type"] == type_f)
+            and self._track_filter_ok(r, track_f)
         ]
         if not targets:
             self._mb(messagebox.showinfo, "Delete All", "No markers match the current filters.")
@@ -6519,7 +6586,11 @@ class MarkerMadness:
             if rec["type"] == "Timeline":
                 self._resolve_delete_marker(timeline, rec["timeline_frame"])
             else:
-                item = rec.get("timeline_item") or self._find_clip_at_frame(timeline, rec["timeline_frame"])
+                item = rec.get("timeline_item") or self._find_clip_at_frame(
+                    timeline, rec["timeline_frame"],
+                    rec.get("track_type") or None,
+                    rec.get("track_index") or None,
+                    rec.get("clip_name") or None)
                 if item:
                     self._resolve_delete_marker(item, rec["marker_frame"])
         self._refresh()
@@ -7128,6 +7199,7 @@ class MarkerMadness:
         """Return (visible, selected) marker lists respecting current filters and search."""
         color_f  = self._filter_color.get()
         type_f   = self._filter_type.get()
+        track_f  = self._filter_track.get() if hasattr(self, "_filter_track") else "All Tracks"
         search_f = self._search_var.get().strip().lower()
         sel_ids  = set(self._tree.selection())
 
@@ -7135,6 +7207,7 @@ class MarkerMadness:
             r for r in sorted(self._all_markers, key=lambda r: r["timeline_frame"])
             if (color_f == "All" or r["color"] == color_f)
             and (type_f == "All Types" or r["type"] == type_f)
+            and self._track_filter_ok(r, track_f)
             and (not search_f or search_f in " ".join([
                 r.get("name", ""), r.get("note", ""), r.get("clip_name", "")
             ]).lower())
