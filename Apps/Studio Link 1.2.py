@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-Studio Link 1.1 — Modify Studio → DaVinci Resolve live bridge
+Studio Link 1.2 — Modify Studio → DaVinci Resolve live bridge
+
+1.2: sign-in aware — the QNAP Studio now runs multi-user with a login wall,
+so the link signs in like any user: an in-window sign-in row appears when
+the server asks for it, the session cookie (180-day) is remembered in
+~/.modify_studio_link_session.json, and your password is never stored.
+Status light: green = linked, orange = sign in needed, red = unreachable.
 
 1.1: QNAP-aware — polls the NAS container (192.168.1.45:8790) as well as
 localhost, and translates container paths (/data/...) to the SMB mount
@@ -52,6 +58,8 @@ STUDIO_URLS = [
 ]
 POLL_SECONDS = 4
 STATE_FILE = os.path.expanduser("~/.modify_studio_link_state.json")
+SESSION_FILE = os.path.expanduser("~/.modify_studio_link_session.json")
+COOKIE_NAME = "studio_session"
 
 # Server-side path -> this-machine path. When Studio runs on the QNAP its
 # jobs report container paths (/data/...); this machine sees those files
@@ -83,20 +91,77 @@ KIND_BINS = {
 ROOT_BIN = "MODIFY STUDIO"
 
 
-def _api_get(base, path, timeout=3):
-    req = urllib.request.Request(base + path, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
+class AuthRequired(Exception):
+    """Studio answered but wants a signed-in session (HTTP 401)."""
+
+
+def load_sessions():
+    try:
+        with open(SESSION_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_sessions(sessions):
+    try:
+        with open(SESSION_FILE, "w", encoding="utf-8") as f:
+            json.dump(sessions, f, indent=1)
+        os.chmod(SESSION_FILE, 0o600)
+    except Exception:
+        pass
+
+
+def _api_request(base, path, payload=None, token=None, timeout=3):
+    """GET (payload None) or POST-JSON. Returns (parsed_json, response).
+    Raises AuthRequired on 401, other errors bubble as usual."""
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["Cookie"] = f"{COOKIE_NAME}={token}"
+    body = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(base + path, data=body, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8")), r
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise AuthRequired(base)
+        raise
+
+
+def _api_get(base, path, token=None, timeout=3):
+    data, _ = _api_request(base, path, token=token, timeout=timeout)
+    return data
 
 
 def find_studio():
-    """Return the first reachable Studio base URL, else None."""
+    """Return (base, me) for the first Studio that answers /api/me, else
+    (None, None). /api/me never needs a session, so this reaches multi-user
+    servers too; `me` says whether a sign-in is still required."""
     for base in STUDIO_URLS:
         try:
-            _api_get(base, "/api/status", timeout=2)
-            return base
+            me = _api_get(base, "/api/me", timeout=2)
+            return base, me
         except Exception:
             continue
+    return None, None
+
+
+def login(base, username, password):
+    """POST /api/login; return the session token on success, else None."""
+    data, resp = _api_request(base, "/api/login",
+                              payload={"username": username,
+                                       "password": password}, timeout=5)
+    if not data.get("ok"):
+        return None
+    if data.get("multiuser") is False:
+        return ""  # single-user server: no cookie needed
+    for header in resp.headers.get_all("Set-Cookie") or []:
+        if header.startswith(COOKIE_NAME + "="):
+            return header.split(";", 1)[0].split("=", 1)[1]
     return None
 
 
@@ -228,6 +293,9 @@ class StudioLink:
         self.resolve = get_resolve()
         self.studio_base = None
         self.state = load_state()          # {project_name: [imported paths]}
+        self.sessions = load_sessions()    # {base_url: cookie token, "_last_user": name}
+        self.login_shown = False
+        self.login_base = None             # base URL awaiting a sign-in
         self.seen_jobs = set()             # job ids observed this session
         self.baselined = False             # first poll marks pre-existing jobs
         self.pending = []                  # (job, paths) awaiting main-thread import
@@ -235,7 +303,7 @@ class StudioLink:
         self.stop_flag = threading.Event()
 
         self.root = tk.Tk()
-        self.root.title("Studio Link 1.1")
+        self.root.title("Studio Link 1.2")
         self.root.configure(bg=BG)
         self.root.geometry("420x430")
         self.root.attributes("-topmost", True)
@@ -255,7 +323,7 @@ class StudioLink:
     def _build_ui(self):
         title = tk.Frame(self.root, bg=TITLE_BG)
         title.pack(fill="x")
-        tk.Label(title, text="STUDIO LINK 1.1", bg=TITLE_BG, fg=ACCENT,
+        tk.Label(title, text="STUDIO LINK 1.2", bg=TITLE_BG, fg=ACCENT,
                  font=F_BOLD, pady=6).pack(side="left", padx=10)
         self.lbl_studio = tk.Label(title, text="● Studio", bg=TITLE_BG,
                                    fg=DIM, font=F_SMALL)
@@ -294,6 +362,25 @@ class StudioLink:
         TBtn(btns, text="Clear Log",
              command=lambda: self.txt.delete("1.0", "end")).pack(side="right")
 
+        # sign-in row — hidden until a multi-user Studio asks for a session
+        self.login_frame = tk.Frame(self.root, bg=PANEL)
+        tk.Label(self.login_frame, text="Studio sign-in", bg=PANEL, fg=ACCENT,
+                 font=F_SMALL).pack(side="left", padx=(8, 6), pady=6)
+        self.ent_user = tk.Entry(self.login_frame, bg=ENTRY_BG, fg=TEXT,
+                                 insertbackground=TEXT, relief="flat",
+                                 font=F_MAIN, width=8)
+        self.ent_user.pack(side="left", padx=(0, 4), ipady=3)
+        self.ent_pass = tk.Entry(self.login_frame, bg=ENTRY_BG, fg=TEXT,
+                                 insertbackground=TEXT, relief="flat",
+                                 font=F_MAIN, width=10, show="•")
+        self.ent_pass.pack(side="left", padx=(0, 6), ipady=3)
+        self.ent_pass.bind("<Return>", lambda _: self._sign_in())
+        TBtn(self.login_frame, text="Sign In", bg=ACCENT, pady=3,
+             command=self._sign_in).pack(side="left", padx=(0, 8))
+        last = self.sessions.get("_last_user")
+        if last:
+            self.ent_user.insert(0, last)
+
         logf = tk.Frame(self.root, bg=BG)
         logf.pack(fill="both", expand=True, padx=10, pady=(0, 4))
         self.txt = tk.Text(logf, bg=ENTRY_BG, fg=TEXT, font=F_MONO,
@@ -318,25 +405,80 @@ class StudioLink:
 
     # ---------------- polling (background thread) ----------------
 
+    def _token(self, base):
+        return self.sessions.get(base) or None
+
     def _poll_loop(self):
         while not self.stop_flag.is_set():
-            base = self.studio_base or find_studio()
-            if base != self.studio_base:
+            base = self.studio_base
+            if not base:
+                base, _me = find_studio()
                 self.studio_base = base
-            ok = False
+            color = RED
             if base:
                 try:
-                    jobs = _api_get(base, "/api/jobs")
-                    ok = True
+                    jobs = _api_get(base, "/api/jobs", token=self._token(base))
+                    color = GREEN
+                    self._auth_ok(base)
                     self._scan_jobs(jobs)
+                except AuthRequired:
+                    color = ACCENT           # reachable, wants a sign-in
+                    self._need_login(base)
                 except Exception:
                     self.studio_base = None
-            color = GREEN if ok else RED
             try:
                 self.lbl_studio.config(fg=color)
             except tk.TclError:
                 return  # window closed
             self.stop_flag.wait(POLL_SECONDS)
+
+    # ---------------- sign-in (multi-user Studio) ----------------
+
+    def _need_login(self, base):
+        if self.sessions.pop(base, None) is not None:
+            save_sessions(self.sessions)   # stored session expired — drop it
+        self.login_base = base
+        if not self.login_shown:
+            self.login_shown = True
+            self.root.after(0, self._show_login_row, base)
+
+    def _auth_ok(self, base):
+        if self.login_shown:
+            self.login_shown = False
+            self.root.after(0, self.login_frame.pack_forget)
+
+    def _show_login_row(self, base):
+        try:
+            self.login_frame.pack(fill="x", padx=10, pady=(0, 6),
+                                  before=self.lbl_status)
+            self._log(f"Studio at {base} needs a sign-in.")
+            (self.ent_pass if self.ent_user.get() else self.ent_user).focus_set()
+        except tk.TclError:
+            pass
+
+    def _sign_in(self):
+        base = self.login_base
+        name = self.ent_user.get().strip().lower()
+        pw = self.ent_pass.get()
+        if not (base and name and pw):
+            return
+        try:
+            token = login(base, name, pw)
+        except AuthRequired:
+            token = None                   # wrong name/password
+        except Exception as e:
+            self._log(f"⚠ sign-in failed: {e}")
+            return
+        self.ent_pass.delete(0, "end")
+        if token is None:
+            self._log("⚠ Studio didn't accept that name/password.")
+            return
+        self.sessions[base] = token
+        self.sessions["_last_user"] = name
+        save_sessions(self.sessions)
+        self._log(f"✓ Signed in to Studio as {name}.")
+        self.login_shown = False
+        self.login_frame.pack_forget()
 
     def _scan_jobs(self, jobs, force_all=False):
         """Queue completed jobs for import. On the first pass, pre-existing
@@ -379,7 +521,12 @@ class StudioLink:
             self._log("⚠ Studio not reachable.")
             return
         try:
-            jobs = _api_get(self.studio_base, "/api/jobs")
+            jobs = _api_get(self.studio_base, "/api/jobs",
+                            token=self._token(self.studio_base))
+        except AuthRequired:
+            self._log("⚠ Sign in to Studio first (see the sign-in row).")
+            self._need_login(self.studio_base)
+            return
         except Exception as e:
             self._log(f"⚠ jobs fetch failed: {e}")
             return

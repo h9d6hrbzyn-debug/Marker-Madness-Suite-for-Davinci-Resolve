@@ -1,4 +1,4 @@
-STUDIO LINK 1.1 — Modify Studio → DaVinci Resolve live bridge
+STUDIO LINK 1.2 — Modify Studio → DaVinci Resolve live bridge
 Part of the Marker Madness suite
 
 WHAT IT DOES
@@ -16,7 +16,7 @@ REQUIREMENTS
 • DaVinci Resolve with an open project
 
 INSTALL
-Copy "Studio Link 1.1.py" into your Resolve scripts folder, then run it
+Copy "Studio Link 1.2.py" into your Resolve scripts folder, then run it
 from Workspace > Scripts > Utility inside Resolve.
 
 macOS:   /Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/
@@ -29,9 +29,18 @@ USE
   press "Import All Now" to pull everything Studio currently remembers.
   (Note: Studio's job list resets when the Studio app restarts.)
 • Kind checkboxes filter what auto-imports (Images / Video / Audio).
-• Status lights: ● Studio (API reachable) and ● Resolve (scripting
-  connected). If Studio is red, launch Modify Studio — the link
-  reconnects on its own.
+• Status lights: ● Studio and ● Resolve (scripting connected).
+  Studio light: green = linked · orange = reachable but needs a
+  sign-in · red = unreachable (launch Modify Studio — the link
+  reconnects on its own).
+
+SIGN-IN (multi-user Studio, e.g. the QNAP)
+When Studio runs with user accounts, an orange light and a sign-in row
+appear in the link window. Enter your Studio name and password once —
+the link keeps the session (about 6 months) in
+~/.modify_studio_link_session.json. Your password itself is never
+stored. The link imports YOUR generations (the account you sign in
+with), matching Studio's per-user worlds.
 
 DUPLICATE SAFETY
 Studio Link remembers what it has imported per Resolve project (state
