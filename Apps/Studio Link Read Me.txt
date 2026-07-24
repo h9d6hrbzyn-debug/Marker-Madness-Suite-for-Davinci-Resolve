@@ -22,9 +22,21 @@ from Workspace > Scripts > Utility inside Resolve.
 macOS:   /Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/
 Windows: C:\ProgramData\Blackmagic Design\DaVinci Resolve\Fusion\Scripts\Utility\
 
+⚠ BLACKMAGIC CLOUD PROJECTS — TURN AUTO-IMPORT OFF
+In a cloud workflow, media begins uploading the moment it lands in a bin,
+carrying whatever directory it came from. Studio Link imports from the
+studio share (/Volumes/ModifyStudio/...), so auto-importing into a CLOUD
+project would upload share paths your collaborators can't resolve and
+scramble the cloud tree.
+For cloud projects the order must be: send the approved version out of
+Studio → copy it into your SHOW DRIVE's renders directory → import into
+Resolve FROM THE DRIVE. Uncheck "Auto-Import" and import by hand until
+drive-first cloud mode ships (RESOLVE-BRIDGE.md Phase 2.5).
+Local (non-cloud) projects are unaffected — auto-import is safe there.
+
 USE
 • Auto-Import (on by default): anything you generate while the link is
-  open lands in the media pool automatically.
+  open lands in the media pool automatically. (See the cloud warning above.)
 • Generations from before you opened the link are NOT auto-imported —
   press "Import All Now" to pull everything Studio currently remembers.
   (Note: Studio's job list resets when the Studio app restarts.)
