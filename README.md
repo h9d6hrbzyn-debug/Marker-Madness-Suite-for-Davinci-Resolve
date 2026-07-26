@@ -78,7 +78,7 @@ Works on Media Pool clips, timelines, or both. Select what you want to rename, c
 
 ---
 
-### <img src="https://resolve-tools.com/images/icons/icon-track-command.png" width="28" style="vertical-align:middle;"> Track Command v1.1
+### <img src="https://resolve-tools.com/images/icons/icon-track-command.png" width="28" style="vertical-align:middle;"> Track Command v1.2
 *Your timeline's track names, finally under control.*
 
 A 65-track timeline where half the audio tracks are still named "Audio 1" through "Audio 65" is nobody's friend — not in exports, not in delivery, not when a client asks where the music stem is.

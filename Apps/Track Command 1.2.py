@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Track Command 1.1 — DaVinci Resolve Track Manager
+Track Command 1.2 — DaVinci Resolve Track Manager
 
 Renames audio and video tracks in the current Resolve timeline.
 Part of the Marker Madness suite.
@@ -312,11 +312,48 @@ class LoadPreviewWindow(tk.Toplevel):
         self.title(f"Load Preview — {filename}")
         self.configure(bg=BG)
         self.resizable(False, False)
-        self.grab_set()
         self._loaded   = loaded
         self._filename = filename
         self._apply_cb = apply_cb
+
+        # ORDER MATTERS on macOS: build hidden → position → show → topmost →
+        # grab-when-visible. Setting topmost/grab on a not-yet-mapped
+        # transient of a topmost parent can leave the window invisible.
+        self.withdraw()
+        self.transient(parent)
         self._build()
+
+        # Center over the main window (positioned relative to the parent so
+        # it lands on whichever monitor the main window is on)
+        self.update_idletasks()
+        try:
+            pw, ph = parent.winfo_width(),  parent.winfo_height()
+            px, py = parent.winfo_rootx(),  parent.winfo_rooty()
+            w, h   = self.winfo_reqwidth(), self.winfo_reqheight()
+            x = px + (pw - w) // 2
+            y = py + max(0, (ph - h) // 3)
+            self.geometry(f"+{x}+{y}")
+        except Exception:
+            pass
+
+        self.deiconify()
+        self.lift()
+        # NOTE: no -topmost here on purpose. The main window suspends its
+        # Float on Top while this dialog is open (_suspend_topmost), so
+        # transient+lift is enough — a topmost flag here just restarts the
+        # z-order war that hid this window with its grab still active.
+
+        # Grab only once the window is actually viewable — grabbing an
+        # unviewable window throws on macOS
+        self._grab_tries = 0
+        def _safe_grab():
+            try:
+                self.grab_set()
+            except Exception:
+                self._grab_tries += 1
+                if self._grab_tries < 10:
+                    self.after(100, _safe_grab)
+        self.after(60, _safe_grab)
 
     def _build(self):
         tk.Label(self, text=f"  Loaded: {self._filename}.txt  ",
@@ -327,6 +364,7 @@ class LoadPreviewWindow(tk.Toplevel):
         pf.columnconfigure(0, weight=1)
         pf.columnconfigure(1, weight=1)
 
+        self._boxes = {}
         for col_idx, (label, key) in enumerate(
                 [("VIDEO TRACKS", "video"), ("AUDIO TRACKS", "audio")]):
             f = tk.Frame(pf, bg=PANEL)
@@ -334,13 +372,24 @@ class LoadPreviewWindow(tk.Toplevel):
                    padx=(0, 4) if col_idx == 0 else (4, 0))
             tk.Label(f, text=label, fg=ACCENT, bg=PANEL,
                      font=F_HDR).pack(anchor="w", padx=6, pady=4)
-            t = tk.Text(f, bg=ENTRY_BG, fg=TEXT, relief="flat",
-                        font=F_MONO, wrap="none", height=14, width=28)
-            t.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+            # Listbox, not Text — clicking a name selects the whole row
+            # (same feel as the main window's track lists) instead of
+            # drag-selecting characters like a text editor.
+            lb = tk.Listbox(f, bg=ENTRY_BG, fg=TEXT, relief="flat",
+                            font=F_MONO, height=14, width=28,
+                            activestyle="none", selectmode="extended",
+                            exportselection=False,
+                            selectbackground=ACCENT,
+                            selectforeground=BTN_TEXT,
+                            highlightthickness=0)
+            lb.pack(fill="both", expand=True, padx=6, pady=(0, 6))
             for track in self._loaded[key]:
                 sub = f" ({track.get('subType','')})" if key == "audio" else ""
-                t.insert("end", track["name"] + sub + "\n")
-            t.config(state="disabled")
+                lb.insert("end", " " + track["name"] + sub)
+            self._boxes[key] = lb
+
+        tk.Label(self, text="Select rows to load only those tracks  ·  nothing selected = load all",
+                 fg=DIM, bg=BG, font=F_SMALL).pack(fill="x", pady=(0, 4))
 
         bf = tk.Frame(self, bg=BG)
         bf.pack(fill="x", padx=12, pady=(0, 12))
@@ -349,12 +398,24 @@ class LoadPreviewWindow(tk.Toplevel):
             ("Add to Timeline",    "add",    BLUE),
             ("Create New Timeline","new",    "#E65100"),
         ]:
-            TBtn(bf, text=text, bg=color, fg=TEXT, padx=10, pady=6,
+            # Default fg (BTN_TEXT, near-black) — the fg=TEXT override made
+            # these the only light-gray-on-color buttons in the suite
+            TBtn(bf, text=text, bg=color, padx=10, pady=6,
                  command=lambda m=mode: self._go(m)
                  ).pack(side="left", fill="x", expand=True, padx=2)
 
     def _go(self, mode):
-        self._apply_cb(self._loaded, mode, self._filename)
+        # Selection filters what gets loaded: any selected rows → exactly
+        # those tracks; no selection anywhere → everything (old behavior).
+        picked  = {"video": [], "audio": []}
+        any_sel = False
+        for key, lb in self._boxes.items():
+            sel = lb.curselection()
+            if sel:
+                any_sel = True
+                picked[key] = [self._loaded[key][i] for i in sel]
+        payload = picked if any_sel else self._loaded
+        self._apply_cb(payload, mode, self._filename)
         self.destroy()
 
 # ---------------------------------------------------------------------------
@@ -366,7 +427,7 @@ class TrackCommander:
     def __init__(self, root):
         self.root = root
         self.root.withdraw()
-        self.root.title("Track Command 1.1")
+        self.root.title("Track Command 1.2")
         self.root.configure(bg=BG)
         self.root.createcommand('::tk::mac::ShowHelp',
             lambda: webbrowser.open("https://resolve-tools.com/track-command-guide"))
@@ -391,6 +452,7 @@ class TrackCommander:
         self._video_search_var    = tk.StringVar()
         self._stay_on_top_var   = tk.BooleanVar(value=True)
         self._topmost_check_job = None
+        self._topmost_suspended = False   # True while a modal dialog is open
         self._hdr_proj_var      = tk.StringVar(value="—")
         self._hdr_tl_var        = tk.StringVar(value="—")
         self._hdr_tracks_var    = tk.StringVar(value="")
@@ -514,7 +576,7 @@ class TrackCommander:
         _tb.pack(fill="x")
         tk.Label(_tb, text="  Track Command", fg=ACCENT, bg=TITLE_BG,
                  font=("Avenir Next", 18)).pack(side="left")
-        tk.Label(_tb, text="v1.1", fg=DIM, bg=TITLE_BG,
+        tk.Label(_tb, text="v1.2", fg=DIM, bg=TITLE_BG,
                  font=("Avenir Next", 10)).pack(side="left", pady=(6, 0))
         _info = tk.Frame(_tb, bg=TITLE_BG)
         _info.pack(side="left", padx=24)
@@ -1036,6 +1098,32 @@ class TrackCommander:
         if self._stay_on_top_var.get():
             self.root.attributes("-topmost", True)
 
+    def _suspend_topmost(self):
+        """Pause ALL Float on Top enforcement while a modal dialog is open.
+        The focus-watcher re-asserting topmost over a grab-holding dialog
+        hides the dialog and locks the app (invisible window eats input)."""
+        self._topmost_suspended = True
+        if self._topmost_check_job:
+            try:
+                self.root.after_cancel(self._topmost_check_job)
+            except Exception:
+                pass
+            self._topmost_check_job = None
+        try:
+            self.root.attributes("-topmost", False)
+        except Exception:
+            pass
+
+    def _resume_topmost(self):
+        """Re-enable Float on Top after the modal dialog closes."""
+        self._topmost_suspended = False
+        if self._stay_on_top_var.get():
+            try:
+                self.root.attributes("-topmost", True)
+                self.root.lift()
+            except Exception:
+                pass
+
     def _on_stay_on_top_changed(self, *_):
         if self._stay_on_top_var.get():
             self.root.attributes("-topmost", True)
@@ -1052,6 +1140,8 @@ class TrackCommander:
     def _on_focus_in(self, event):
         if event.widget is not self.root:
             return
+        if self._topmost_suspended:
+            return
         if self._stay_on_top_var.get():
             self.root.attributes("-topmost", True)
         self._reconnect()
@@ -1064,13 +1154,15 @@ class TrackCommander:
     def _on_focus_out(self, event):
         if event.widget != self.root or not self._stay_on_top_var.get():
             return
+        if self._topmost_suspended:
+            return
         if self._topmost_check_job:
             self.root.after_cancel(self._topmost_check_job)
         self._topmost_check_job = self.root.after(120, self._check_frontmost_app)
 
     def _check_frontmost_app(self):
         self._topmost_check_job = None
-        if not self._stay_on_top_var.get():
+        if not self._stay_on_top_var.get() or self._topmost_suspended:
             return
         try:
             if self.root.focus_displayof() is not None:
@@ -1348,11 +1440,19 @@ class TrackCommander:
     def _save_tracks(self):
         if not self._timeline:
             return
-        fp = filedialog.asksaveasfilename(
-            defaultextension=".txt",
-            initialfile=self._tl_name() + ".txt",
-            filetypes=[("Text files", "*.txt")],
-            title="Save Track Names")
+        # Same Float-on-Top suspension as _load_tracks — the native save
+        # panel can't outrank a topmost Tk window
+        self._suspend_topmost()
+        fp = ""
+        try:
+            fp = filedialog.asksaveasfilename(
+                parent=self.root,
+                defaultextension=".txt",
+                initialfile=self._tl_name() + ".txt",
+                filetypes=[("Text files", "*.txt")],
+                title="Save Track Names")
+        finally:
+            self._resume_topmost()
         if not fp:
             return
         lines = []
@@ -1372,10 +1472,21 @@ class TrackCommander:
             self._set_info(f"[X] Save failed: {e}")
 
     def _load_tracks(self):
-        fp = filedialog.askopenfilename(
-            filetypes=[("Text files", "*.txt")],
-            title="Load Track Names")
+        # Suspend Float on Top for the ENTIRE load flow — file dialog AND
+        # modal preview. The focus-watcher re-asserting topmost mid-dialog
+        # is what buried the preview (with its input grab still active =
+        # app lockup). Resumed when the preview closes or we bail early.
+        self._suspend_topmost()
+        fp = ""
+        try:
+            fp = filedialog.askopenfilename(
+                filetypes=[("Text files", "*.txt")],
+                title="Load Track Names",
+                parent=self.root)
+        except Exception:
+            pass
         if not fp:
+            self._resume_topmost()
             return
         loaded  = {"video": [], "audio": []}
         section = None
@@ -1407,10 +1518,14 @@ class TrackCommander:
                         else:
                             loaded["audio"].append({"name": line, "subType": "mono"})
         except Exception as e:
+            self._resume_topmost()
             self._set_info(f"[X] Load failed: {e}"); return
 
         filename = os.path.splitext(os.path.basename(fp))[0]
-        LoadPreviewWindow(self.root, loaded, filename, self._apply_load)
+        win = LoadPreviewWindow(self.root, loaded, filename, self._apply_load)
+        # Resume Float on Top only when the preview actually closes
+        win.bind("<Destroy>",
+                 lambda e: self._resume_topmost() if e.widget is win else None)
 
     def _apply_load(self, loaded, mode, filename):
         if mode == "new":

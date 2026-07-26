@@ -1,4 +1,4 @@
-Track Command v1.1
+Track Command v1.2
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -8,12 +8,26 @@ Track Command gives you full control over timeline tracks in DaVinci
 Resolve. Rename tracks, reorder them, add or delete tracks, and manage
 track visibility — all from a clean, dedicated panel.
 
+WHAT'S NEW IN 1.2
+- Load Tracks preview now opens centered over the main window and
+  always in front — Float on Top politely steps aside while the
+  preview or a file dialog is open, then comes right back (fixes the
+  preview getting lost on big multi-monitor setups, and a freeze
+  when it slipped behind the main window)
+- Track names in the preview select as full rows — click a name to
+  highlight the whole line, shift/cmd-click for multiples
+- Selection now chooses what loads: select rows to load only those
+  tracks; nothing selected = load everything (as before)
+- Load/Save file dialogs open in front of the floating window
+- Preview action buttons now use the suite's standard button text
+  color (they were light-gray-on-color and hard to read)
+
 REQUIREMENTS
 • DaVinci Resolve 18 or later
 • macOS
 
 INSTALLATION
-1. Copy "Track Command 1.1.py" to:
+1. Copy "Track Command 1.2.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -23,7 +37,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Track Command 1.1
+   Workspace → Scripts → Utility → Track Command 1.2
 
 FULL DOCUMENTATION
    resolve-tools.com/track-command-guide
