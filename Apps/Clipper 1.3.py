@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clipper 1.2 — DaVinci Resolve Subclip Generator
+Clipper 1.3 — DaVinci Resolve Subclip Generator
 
 Creates a Media Pool subclip for every clip on a chosen video track
 in the current Resolve timeline. Part of the Marker Madness suite.
@@ -17,9 +17,31 @@ Installation:
 
 import sys
 import os
+import json
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import webbrowser
+
+# ── Prefs (saved defaults, e.g. handles) — stored next to the script ──────
+try:
+    _PREFS_DIR = os.path.dirname(os.path.abspath(__file__))
+except Exception:
+    _PREFS_DIR = os.path.expanduser("~/Library/Application Support/Marker Madness")
+_PREFS_FILE = os.path.join(_PREFS_DIR, "clipper_prefs.json")
+
+def _load_prefs() -> dict:
+    try:
+        with open(_PREFS_FILE, "r", encoding="utf-8") as fh:
+            return json.load(fh) or {}
+    except Exception:
+        return {}
+
+def _save_prefs(d: dict):
+    try:
+        with open(_PREFS_FILE, "w", encoding="utf-8") as fh:
+            json.dump(d, fh, indent=2)
+    except Exception:
+        pass
 
 # ---------------------------------------------------------------------------
 # App icon (embedded Base64 PNG — no external file required)
@@ -252,7 +274,7 @@ class Clipper:
     def __init__(self, root):
         self.root = root
         self.root.withdraw()
-        self.root.title("Clipper 1.2")
+        self.root.title("Clipper 1.3")
         self.root.configure(bg=BG)
         self.root.createcommand('::tk::mac::ShowHelp',
             lambda: webbrowser.open("https://resolve-tools.com/clipper-guide"))
@@ -294,14 +316,18 @@ class Clipper:
         self._range_var      = tk.StringVar(value="all")   # "all" | "inout" | "selection"
         self._range_in_var   = tk.StringVar(value="")
         self._range_out_var  = tk.StringVar(value="")
-        self._handles_var      = tk.IntVar(value=0)    # shared head+tail
+        _p = _load_prefs()   # saved defaults — see ★ Make Default
+        self._handles_on       = tk.BooleanVar(value=False)  # handles OFF by default
+        self._handles_var      = tk.IntVar(value=int(_p.get("handles", 8)))  # shared head+tail
         self._handles_custom   = tk.BooleanVar(value=False)
-        self._head_handles_var = tk.IntVar(value=0)    # custom head
-        self._tail_handles_var = tk.IntVar(value=0)    # custom tail
+        self._head_handles_var = tk.IntVar(value=int(_p.get("head", 0)))     # custom head
+        self._tail_handles_var = tk.IntVar(value=int(_p.get("tail", 0)))     # custom tail
         self._markers_var      = tk.BooleanVar(value=False)  # preserve clip markers
+        self._marker_name_var  = tk.BooleanVar(value=False)  # name subclips from markers
         self._order_var        = tk.BooleanVar(value=False)  # preserve timeline order prefix
         self._order_mode_var   = tk.StringVar(value="seq")   # "seq" (T01_) | "tc" (timecode)
         self._video_only_var   = tk.BooleanVar(value=False)  # strip audio tracks from created timelines
+        self._reel_var         = tk.BooleanVar(value=False)  # assemble created clips into one reel timeline
         self._show_summary_var = tk.BooleanVar(value=True)   # show completion dialog after each run
 
         # internal data
@@ -441,7 +467,7 @@ class Clipper:
         name_row.pack(fill="x", padx=16, pady=(12, 0))
         tk.Label(name_row, text="✂  Clipper", fg=ACCENT, bg=PANEL,
                  font=("Avenir Next", 18, "bold")).pack(side="left")
-        tk.Label(name_row, text="v1.2", fg=DIM, bg=PANEL,
+        tk.Label(name_row, text="v1.3", fg=DIM, bg=PANEL,
                  font=F_SMALL).pack(side="left", padx=(4, 0), pady=(4, 0))
 
         # Float on top checkbox
@@ -619,18 +645,35 @@ class Clipper:
         hdl_frame = tk.Frame(cf, bg=BG)
         hdl_frame.grid(row=7, column=1, sticky="w", pady=5)
 
+        # Master toggle — handles OFF by default; switching on brings in the
+        # saved default value (★ Make Default)
+        tk.Checkbutton(hdl_frame, text="Add handles",
+                       variable=self._handles_on,
+                       fg=TEXT, bg=BG, activeforeground=TEXT,
+                       activebackground=BG, selectcolor=ENTRY_BG,
+                       font=F_SMALL,
+                       command=self._on_handles_toggle).pack(side="left", padx=(0, 10))
+
         # Shared head+tail counter  [−] [n] [+]
-        self._make_counter(hdl_frame, self._handles_var).pack(side="left")
+        self._hdl_counter = self._make_counter(hdl_frame, self._handles_var)
+        self._hdl_counter.pack(side="left")
         tk.Label(hdl_frame, text="frames each side",
                  fg=DIM, bg=BG, font=F_SMALL).pack(side="left", padx=(6, 14))
 
         # Custom checkbox
-        tk.Checkbutton(hdl_frame, text="Custom head / tail",
+        self._hdl_custom_cb = tk.Checkbutton(hdl_frame, text="Custom head / tail",
                        variable=self._handles_custom,
                        fg=DIM, bg=BG, activeforeground=TEXT,
                        activebackground=BG, selectcolor=ENTRY_BG,
                        font=F_SMALL,
-                       command=self._on_handles_mode).pack(side="left")
+                       command=self._on_handles_mode)
+        self._hdl_custom_cb.pack(side="left")
+
+        self._hdl_default_btn = TBtn(hdl_frame, text="★ Make Default",
+             command=self._save_handles_default,
+             padx=8, pady=3, font=F_SMALL)
+        self._hdl_default_btn.pack(side="left", padx=(14, 0))
+        self._on_handles_toggle()   # apply initial (off) state
 
         # Custom head/tail row — hidden until checkbox ticked
         self._hdl_custom_frame = tk.Frame(cf, bg=BG)
@@ -654,7 +697,9 @@ class Clipper:
             v.trace_add("write", lambda *_: self._schedule_preview())
 
         # Hint
-        tk.Label(cf, text="Clip name = Prefix + Source Clip Name + Suffix",
+        tk.Label(cf, text="Clip name = Prefix + Source Clip Name + Suffix   ·   "
+                          "Name from markers: first named marker on the clip "
+                          "replaces the source name",
                  fg=DIM, bg=BG, font=F_SMALL).grid(
                      row=9, column=0, columnspan=3, sticky="w", pady=(2, 4))
 
@@ -668,6 +713,14 @@ class Clipper:
                        fg=TEXT, bg=BG, activeforeground=TEXT,
                        activebackground=BG, selectcolor=ENTRY_BG,
                        font=F_MAIN).pack(side="left")
+
+        tk.Checkbutton(opts_frame,
+                       text="Name from markers",
+                       variable=self._marker_name_var,
+                       command=self._schedule_preview,
+                       fg=TEXT, bg=BG, activeforeground=TEXT,
+                       activebackground=BG, selectcolor=ENTRY_BG,
+                       font=F_MAIN).pack(side="left", padx=(20, 0))
 
         tk.Checkbutton(opts_frame,
                        text="Preserve Timeline Order",
@@ -710,9 +763,20 @@ class Clipper:
                        activebackground=BG, selectcolor=ENTRY_BG,
                        font=F_MAIN).pack(side="left")
 
+        # Build reel gets its OWN row — sharing the Video only row clipped
+        # its label into unreadability
+        opts_frame2b = tk.Frame(cf, bg=BG)
+        opts_frame2b.grid(row=13, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        tk.Checkbutton(opts_frame2b,
+                       text="Build reel  (assemble created clips into one sequence — beta)",
+                       variable=self._reel_var,
+                       fg=TEXT, bg=BG, activeforeground=TEXT,
+                       activebackground=BG, selectcolor=ENTRY_BG,
+                       font=F_MAIN).pack(side="left")
+
         # Row 13 — completion dialog toggle
         opts_frame3 = tk.Frame(cf, bg=BG)
-        opts_frame3.grid(row=13, column=0, columnspan=3, sticky="w", pady=(2, 6))
+        opts_frame3.grid(row=14, column=0, columnspan=3, sticky="w", pady=(2, 6))
 
         tk.Checkbutton(opts_frame3,
                        text="Show completion summary",
@@ -723,7 +787,7 @@ class Clipper:
 
         # Separator
         tk.Frame(cf, bg=BTN_HOV, height=1).grid(
-            row=14, column=0, columnspan=3, sticky="ew", pady=(0, 0))
+            row=15, column=0, columnspan=3, sticky="ew", pady=(0, 0))
 
     def _build_preview(self):
         pf = tk.Frame(self.root, bg=BG)
@@ -886,12 +950,18 @@ class Clipper:
         # 3. Final fallback: first label in the list.
         cur = self._track_var.get()
 
-        # Resolve current selection → (ttype, tidx)
+        # Resolve current selection → (ttype, tidx) by PARSING the label
+        # itself ("V4  —  10 clips" → video, 4). Matching the old label
+        # string against the refreshed list fails whenever a clip count
+        # changes (or the timeline switches), which reset the dropdown to
+        # All tracks after every run.
         cur_ttype, cur_tidx = None, None
-        for (lbl, tt, ti, _) in self._track_list:
-            if lbl == cur:
-                cur_ttype, cur_tidx = tt, ti
-                break
+        tok = cur.split("—")[0].strip() if cur else ""
+        if tok.startswith("All tracks"):
+            cur_ttype, cur_tidx = "all", 0
+        elif len(tok) >= 2 and tok[0] in ("V", "A") and tok[1:].isdigit():
+            cur_ttype = "video" if tok[0] == "V" else "audio"
+            cur_tidx  = int(tok[1:])
 
         # Find the refreshed label for the same track
         matched = None
@@ -1342,6 +1412,44 @@ class Clipper:
             self.root.after_cancel(self._preview_job)
         self._preview_job = self.root.after(120, self._refresh_preview)
 
+    def _marker_name_for(self, item, tl_start):
+        """Return the name of the earliest named marker on this timeline item.
+        Clip markers win; if the clip has none, fall back to timeline-ruler
+        markers whose position falls within the clip's span. '' if neither."""
+        try:
+            markers = item.GetMarkers() or {}
+            try:
+                lo = item.GetLeftOffset() or 0
+            except Exception:
+                lo = 0
+            try:
+                dur = item.GetDuration() or 0
+            except Exception:
+                dur = 0
+            for off in sorted(markers):
+                # GetMarkers() returns every marker on the SOURCE clip —
+                # only count ones inside this cut's visible span, else a
+                # stray marker elsewhere on a reused source names every
+                # instance of it (same tight filter as Marker Madness).
+                if dur and not (lo <= off < lo + dur):
+                    continue
+                nm = (markers[off].get("name") or "").strip()
+                if nm:
+                    return nm
+        except Exception:
+            pass
+        try:
+            tl_markers = self._timeline.GetMarkers() or {}
+            c_start, c_end = item.GetStart(), item.GetEnd()
+            for off in sorted(tl_markers):
+                if c_start <= tl_start + off < c_end:
+                    nm = (tl_markers[off].get("name") or "").strip()
+                    if nm:
+                        return nm
+        except Exception:
+            pass
+        return ""
+
     def _refresh_preview(self):
         self._preview_job = None
         self._refreshing  = True
@@ -1414,8 +1522,10 @@ class Clipper:
                     src_dur = tl_dur
                 src_out   = src_in + src_dur - 1
 
-                # Apply handles to source in/out
-                if self._handles_custom.get():
+                # Apply handles to source in/out (only when Add handles is on)
+                if not self._handles_on.get():
+                    head_h = tail_h = 0
+                elif self._handles_custom.get():
                     head_h = max(0, self._head_handles_var.get())
                     tail_h = max(0, self._tail_handles_var.get())
                 else:
@@ -1434,7 +1544,12 @@ class Clipper:
                     if clip_abs_end <= range_in or clip_abs_start >= range_out:
                         continue
 
-                subclip_base = f"{prefix}{clip_name}{suffix}"
+                base_name = clip_name
+                if self._marker_name_var.get():
+                    mname = self._marker_name_for(item, tl_start)
+                    if mname:
+                        base_name = mname
+                subclip_base = f"{prefix}{base_name}{suffix}"
                 name_counts[subclip_base] = name_counts.get(subclip_base, 0) + 1
 
                 try:
@@ -1684,8 +1799,10 @@ class Clipper:
                     except Exception:
                         pass
 
-                    # Apply handles
-                    if self._handles_custom.get():
+                    # Apply handles (only when Add handles is on)
+                    if not self._handles_on.get():
+                        head_h = tail_h = 0
+                    elif self._handles_custom.get():
                         head_h = max(0, self._head_handles_var.get())
                         tail_h = max(0, self._tail_handles_var.get())
                     else:
@@ -1741,6 +1858,13 @@ class Clipper:
             out_safe = out_tc.replace(":", "-")
             seq_name = f"{tl_name} ({in_safe}–{out_safe})"
 
+        # Pre-uniquify the sequence name — a taken name makes Resolve pop a
+        # blocking duplicate dialog on every create attempt
+        _orig_seq = seq_name
+        seq_name  = self._unique_tl_name(seq_name, self._existing_timeline_names())
+        if seq_name != _orig_seq:
+            self._log(f"  '{_orig_seq}' exists — creating as '{seq_name}'")
+
         bin_name = self._bin_var.get()
         self._log(f"Clip from Range: '{seq_name}'  clips={len(clip_infos)}")
 
@@ -1775,18 +1899,84 @@ class Clipper:
         first_ci = {k: v for k, v in clip_infos[0].items()
                     if k != "recordFrame"}
 
-        new_tl = None
-        # Use exclusive endFrame convention (consistent with CreateSubClip and
-        # AppendToTimeline) so the first clip gets its correct last frame.
-        for tag, end_adj in [("excl+1", 1), ("incl", 0)]:
-            adj = {**first_ci, "endFrame": first_ci["endFrame"] + end_adj}
+        # Video only: request video-only placement at build time via the
+        # clipInfo "mediaType" key (1 = video only) so audio media is never
+        # added at all. mediaType is documented for AppendToTimeline but not
+        # for CreateTimelineFromClips — retries drop it if rejected
+        # (_strip_audio_tracks still runs afterwards as cleanup either way).
+        vo = self._video_only_var.get()
+
+        def _count_video_items(tl):
+            """Placement proof: actual video item count in a timeline."""
             try:
-                new_tl = self._media_pool.CreateTimelineFromClips(seq_name, [adj])
-                self._log(f"  CreateTimelineFromClips({tag}) clip[0] → {new_tl!r}")
-                if new_tl:
+                total = 0
+                for vi in range(1, int(tl.GetTrackCount("video") or 0) + 1):
+                    total += len(tl.GetItemListInTrack("video", vi) or [])
+                return total
+            except Exception:
+                return -1
+
+        new_tl      = None
+        one_shot_ok = False
+
+        # ── STRATEGY 1: single-shot CreateTimelineFromClips with explicit ──
+        # recordFrames. Grouped/synced clips (GRP/SER sources) break
+        # AppendToTimeline — audio-only half-placements that return None —
+        # so building the whole reel in ONE call is tried first. recordFrame
+        # is supplied explicitly per clip to prevent the multi-clip scatter
+        # bug (Resolve falls back to startFrame as record position otherwise).
+        if len(clip_infos) > 1:
+            one_shot = []
+            rec = 0
+            for ci in clip_infos:
+                dur = ci["endFrame"] - ci["startFrame"] + 1
+                one_shot.append({**ci,
+                                 "endFrame":    ci["endFrame"] + 1,
+                                 "recordFrame": rec})
+                rec += dur
+            os_variants = ([("one-shot+mt", True), ("one-shot", False)]
+                           if vo else [("one-shot", False)])
+            for tag, use_mt in os_variants:
+                infos = [({**e, "mediaType": 1} if use_mt else dict(e))
+                         for e in one_shot]
+                cand = None
+                try:
+                    cand = self._media_pool.CreateTimelineFromClips(seq_name, infos)
+                except Exception as exc:
+                    self._log(f"  CreateTimelineFromClips({tag}) exception: {exc}")
+                n_placed = _count_video_items(cand) if cand else -1
+                self._log(f"  CreateTimelineFromClips({tag}) → {cand!r}  "
+                          f"video items: {n_placed}/{len(clip_infos)}")
+                if cand and n_placed == len(clip_infos):
+                    new_tl      = cand
+                    one_shot_ok = True
                     break
-            except Exception as exc:
-                self._log(f"  CreateTimelineFromClips({tag}) exception: {exc}")
+                if cand:
+                    # Partial or scattered — remove it and fall through
+                    try:
+                        ok_del = self._media_pool.DeleteTimelines([cand])
+                        self._log(f"    incomplete one-shot deleted → {ok_del}")
+                    except Exception as exc:
+                        self._log(f"    ⚠ could not delete incomplete one-shot: {exc}")
+
+        # ── STRATEGY 2 (fallback): clip[0] then append the rest ───────────
+        if new_tl is None:
+            # Use exclusive endFrame convention (consistent with CreateSubClip and
+            # AppendToTimeline) so the first clip gets its correct last frame.
+            attempts = [("excl+1", 1, vo), ("incl", 0, vo)]
+            if vo:
+                attempts += [("excl+1 -mt", 1, False), ("incl -mt", 0, False)]
+            for tag, end_adj, use_mt in attempts:
+                adj = {**first_ci, "endFrame": first_ci["endFrame"] + end_adj}
+                if use_mt:
+                    adj["mediaType"] = 1
+                try:
+                    new_tl = self._media_pool.CreateTimelineFromClips(seq_name, [adj])
+                    self._log(f"  CreateTimelineFromClips({tag}) clip[0] → {new_tl!r}")
+                    if new_tl:
+                        break
+                except Exception as exc:
+                    self._log(f"  CreateTimelineFromClips({tag}) exception: {exc}")
 
         if not new_tl:
             if _orig_tl:
@@ -1804,9 +1994,26 @@ class Clipper:
             self._schedule_preview()
             return
 
-        # Copy markers from the first original clip onto the first clip in the new timeline
         copy_markers = self._markers_var.get()
-        if copy_markers:
+        if copy_markers and one_shot_ok:
+            # One-shot placed everything — copy markers onto every new item,
+            # matched to the originals by record order.
+            try:
+                items_v1 = sorted(new_tl.GetItemListInTrack("video", 1) or [],
+                                  key=lambda it: it.GetStart())
+                for i, dst in enumerate(items_v1[:len(clip_metas)]):
+                    try:
+                        n = self._copy_markers(clip_metas[i]["item"], dst,
+                                               clip_metas[i]["head_h"])
+                        if n:
+                            self._log(f"  clip[{i}] markers copied: {n}")
+                    except Exception as exc:
+                        self._log(f"  ⚠ marker copy clip[{i}]: {exc}")
+            except Exception as exc:
+                self._log(f"  ⚠ marker copy pass: {exc}")
+        elif copy_markers:
+            # Copy markers from the first original clip onto the first clip
+            # in the new timeline (appends handle the rest per clip)
             try:
                 new_items_0 = new_tl.GetItemListInTrack(ttype, 1) or []
                 if new_items_0:
@@ -1817,54 +2024,150 @@ class Clipper:
             except Exception as exc:
                 self._log(f"  ⚠ marker copy clip[0]: {exc}")
 
-        # Switch to the new timeline so AppendToTimeline targets it
-        try:
-            self._project.SetCurrentTimeline(new_tl)
-        except Exception as exc:
-            self._log(f"  ⚠ SetCurrentTimeline: {exc}")
+        # Switch to the new timeline so AppendToTimeline targets it — and
+        # VERIFY the switch took, because appends land on the CURRENT
+        # timeline. If the switch failed we must not append at all, or the
+        # clips would pile onto the user's original timeline.
+        switched = False
+        if not one_shot_ok:
+            try:
+                self._project.SetCurrentTimeline(new_tl)
+                _cur = self._project.GetCurrentTimeline()
+                switched = bool(_cur) and _cur.GetName() == new_tl.GetName()
+            except Exception as exc:
+                self._log(f"  ⚠ SetCurrentTimeline: {exc}")
+            self._log(f"  switched to new timeline: {switched}")
+
+        def _video_item_count():
+            """Count actual video items in the new timeline — AppendToTimeline
+            can return success objects without placing anything, so the item
+            count is the only placement proof we trust."""
+            try:
+                total = 0
+                for vi in range(1, int(new_tl.GetTrackCount("video") or 0) + 1):
+                    total += len(new_tl.GetItemListInTrack("video", vi) or [])
+                return total
+            except Exception:
+                return -1
+
+        def _audio_snapshot():
+            snap = []
+            try:
+                for ai in range(1, int(new_tl.GetTrackCount("audio") or 0) + 1):
+                    snap.append(len(new_tl.GetItemListInTrack("audio", ai) or []))
+            except Exception:
+                pass
+            return snap
+
+        def _cleanup_new_audio(snap):
+            """A failed video append can still deposit the clip's AUDIO —
+            delete anything that appeared beyond the snapshot counts
+            (appends land at the end of each track)."""
+            removed = 0
+            try:
+                for ai in range(1, int(new_tl.GetTrackCount("audio") or 0) + 1):
+                    items = list(new_tl.GetItemListInTrack("audio", ai) or [])
+                    had   = snap[ai - 1] if ai - 1 < len(snap) else 0
+                    extra = items[had:]
+                    if extra:
+                        try:
+                            new_tl.DeleteClips(extra)
+                            removed += len(extra)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            if removed:
+                self._log(f"    cleaned {removed} stray audio item(s) from failed attempt")
 
         # Append remaining clips one at a time — AppendToTimeline always
         # places each clip immediately after the last clip in the current timeline,
         # guaranteeing correct sequential order without any recordFrame arithmetic.
-        appended = 1
+        appended = len(clip_infos) if one_shot_ok else 1
+        failed_clips = []
         has_append = callable(getattr(self._media_pool, "AppendToTimeline", None))
-        self._log(f"  AppendToTimeline available: {has_append}")
+        if not one_shot_ok:
+            self._log(f"  AppendToTimeline available: {has_append}")
 
-        if has_append and len(clip_infos) > 1:
+        if one_shot_ok:
+            pass    # everything already placed in one call
+        elif has_append and len(clip_infos) > 1 and not switched:
+            self._log("  ✗ appends skipped — could not switch to the new timeline "
+                      "(clips would have landed on the original)")
+        elif has_append and len(clip_infos) > 1:
+            placed_count = _video_item_count()
             for i, ci in enumerate(clip_infos[1:], 1):
-                ci_clean = {k: v for k, v in ci.items() if k != "recordFrame"}
-                ok = False
+                base = {k: v for k, v in ci.items() if k != "recordFrame"}
+                # Minimal dict drops trackIndex/videoStreamIdx — a source
+                # trackIndex (e.g. V4) can confuse appends into a timeline
+                # that only has V1.
+                minimal = {"mediaPoolItem": base["mediaPoolItem"],
+                           "startFrame":   base["startFrame"],
+                           "endFrame":     base["endFrame"]}
                 # AppendToTimeline uses exclusive endFrame (unlike CreateTimelineFromClips
-                # which uses inclusive). Always add 1 to avoid accumulating 1-frame shortfall.
+                # which uses inclusive). Try excl+1 in every dict shape before incl.
+                cands = []
                 for tag, end_adj in [("excl+1", 1), ("incl", 0)]:
-                    adj = {**ci_clean, "endFrame": ci_clean["endFrame"] + end_adj}
+                    if vo:
+                        cands.append((f"{tag} full+mt",
+                                      {**base, "endFrame": base["endFrame"] + end_adj,
+                                       "mediaType": 1}))
+                        cands.append((f"{tag} min+mt",
+                                      {**minimal, "endFrame": minimal["endFrame"] + end_adj,
+                                       "mediaType": 1}))
+                    cands.append((f"{tag} full",
+                                  {**base, "endFrame": base["endFrame"] + end_adj}))
+                    cands.append((f"{tag} min",
+                                  {**minimal, "endFrame": minimal["endFrame"] + end_adj}))
+
+                ok = False
+                for tag, adj in cands:
+                    a_snap = _audio_snapshot()
                     try:
                         r = self._media_pool.AppendToTimeline([adj])
-                        self._log(f"  AppendToTimeline[{i}]({tag}) → {r!r}")
-                        if r:
-                            appended += 1
-                            ok = True
-                            # Copy markers from the original clip to the new timeline item
-                            if copy_markers:
-                                try:
-                                    n = self._copy_markers(clip_metas[i]["item"],
-                                                           r[0],
-                                                           clip_metas[i]["head_h"])
-                                    self._log(f"  clip[{i}] markers copied: {n}")
-                                except Exception as exc:
-                                    self._log(f"  ⚠ marker copy clip[{i}]: {exc}")
-                            break
                     except Exception as exc:
                         self._log(f"  AppendToTimeline[{i}]({tag}) exception: {exc}")
+                        continue
+                    now = _video_item_count()
+                    really_placed = now > placed_count
+                    self._log(f"  AppendToTimeline[{i}]({tag}) → {r!r}  "
+                              f"placed={'yes' if really_placed else 'NO'} "
+                              f"(items {placed_count}→{now})")
+                    if not really_placed:
+                        _cleanup_new_audio(a_snap)
+                        continue
+                    placed_count = now
+                    appended += 1
+                    ok = True
+                    # Copy markers from the original clip to the new timeline item
+                    if copy_markers:
+                        try:
+                            dst = r[0] if isinstance(r, (list, tuple)) and r else None
+                            if dst is None:
+                                items = new_tl.GetItemListInTrack("video", 1) or []
+                                dst = items[-1] if items else None
+                            if dst:
+                                n = self._copy_markers(clip_metas[i]["item"], dst,
+                                                       clip_metas[i]["head_h"])
+                                self._log(f"  clip[{i}] markers copied: {n}")
+                        except Exception as exc:
+                            self._log(f"  ⚠ marker copy clip[{i}]: {exc}")
+                    break
                 if not ok:
-                    self._log(f"  ⚠ clip[{i}] could not be appended")
+                    try:
+                        nm = clip_metas[i]["item"].GetName() or f"clip {i + 1}"
+                    except Exception:
+                        nm = f"clip {i + 1}"
+                    failed_clips.append(nm)
+                    self._log(f"  ⚠ '{nm}' could not be appended — likely a "
+                              "grouped/synced clip; flatten it and re-run")
 
                 # Allow UI events (Abort button) to register after each append
                 self.root.update()
                 if self._abort_flag:
                     self._log(f"⛔  Clip from Range aborted — placed {appended} of {len(clip_infos)} clips.")
                     break
-        elif not has_append and len(clip_infos) > 1:
+        elif not one_shot_ok and not has_append and len(clip_infos) > 1:
             self._log("  ⚠ AppendToTimeline not available — only first clip placed.")
 
         self._log(f"  placed {appended} of {len(clip_infos)} clips in '{seq_name}'")
@@ -1885,11 +2188,24 @@ class Clipper:
 
         aborted_seq = self._abort_flag
         self._log(f"✓  '{seq_name}' → '{bin_name}'")
-        if self._show_summary_var.get() or aborted_seq:
-            messagebox.showinfo("Done",
+        flatten_note = ""
+        if failed_clips:
+            shown = "\n".join(f"  • {n}" for n in failed_clips[:8])
+            if len(failed_clips) > 8:
+                shown += f"\n  … and {len(failed_clips) - 8} more"
+            flatten_note = (
+                f"\n\n⚠ {len(failed_clips)} grouped/synced clip(s) skipped — "
+                f"Resolve's API can't place these:\n{shown}\n\n"
+                "Fix: copy them to a spare track, FLATTEN the copies "
+                "(non-destructive — originals keep their grouping), select "
+                "that track in Clipper, and run again."
+            )
+        if self._show_summary_var.get() or aborted_seq or failed_clips:
+            messagebox.showinfo("Done" if not failed_clips else "Done — with skips",
                 f"Created:\n{seq_name}\n\nBin: {bin_name}\n\n"
                 f"Clips placed: {appended} of {len(clip_infos)}"
-                + (f"\nSkipped (no media): {skipped_mpi}" if skipped_mpi else ""),
+                + (f"\nSkipped (no media): {skipped_mpi}" if skipped_mpi else "")
+                + flatten_note,
                 parent=self.root)
 
         self._schedule_preview()
@@ -2005,6 +2321,38 @@ class Clipper:
         # Reuse the main create logic but with only selected rows
         self._run_subclip_batch(selected_rows, label="Selected")
 
+    def _existing_timeline_names(self):
+        """Names of every timeline in the project. Resolve pops a BLOCKING
+        'timeline already exists' dialog if a create is attempted with a
+        taken name — always check first, never attempt a duplicate."""
+        names = set()
+        try:
+            n = int(self._project.GetTimelineCount() or 0)
+            for i in range(1, n + 1):
+                try:
+                    tl = self._project.GetTimelineByIndex(i)
+                    if tl:
+                        names.add(tl.GetName())
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return names
+
+    @staticmethod
+    def _unique_tl_name(base, existing):
+        """Return base, or base_02 / base_03 … if base is taken.
+        Adds the chosen name to `existing` so the batch stays collision-free."""
+        if base not in existing:
+            existing.add(base)
+            return base
+        k = 2
+        while f"{base}_{k:02d}" in existing and k < 100:
+            k += 1
+        name = f"{base}_{k:02d}"
+        existing.add(name)
+        return name
+
     def _run_subclip_batch(self, rows, label="All"):
         """Core subclip creation loop — called by both Create All and Create Selected.
 
@@ -2039,6 +2387,7 @@ class Clipper:
         self._start_batch()
 
         added = 0; skipped = 0; failed = 0
+        reel_names = []   # successful creations in order, for Build Reel
         errors = []
 
         # ── API probe ─────────────────────────────────────────────────────
@@ -2131,6 +2480,7 @@ class Clipper:
         do_order      = self._order_var.get()
         order_mode    = self._order_mode_var.get()   # "seq" | "tc"
         do_video_only = self._video_only_var.get()
+        existing_tls  = self._existing_timeline_names()
         n_valid    = len(valid)
         n_width    = len(str(n_valid))   # digits to zero-pad (e.g. 7 clips → 1, 15 → 2)
         # head_h for marker offset adjustment (mirrors _refresh_preview logic)
@@ -2212,12 +2562,29 @@ class Clipper:
                 # Multicam clips, grouped clips, and some compound clips
                 # return None from CreateSubClip even when the API is present.
                 if not result and has_tl:
+                    # Fallback creates a TIMELINE — pre-uniquify the name so
+                    # Resolve never pops its blocking duplicate-name dialog
+                    _orig_nm  = final_name
+                    final_name = self._unique_tl_name(final_name, existing_tls)
+                    if final_name != _orig_nm:
+                        self._log(f"  '{_orig_nm}' exists — creating as '{final_name}'")
                     self._log(f"  PATH A failed — trying PATH B fallback for '{final_name}'")
                     fb_info = [{"mediaPoolItem": mpi,
                                 "startFrame":   row["src_in"],
                                 "endFrame":     row["src_out"] + 1}]
-                    for tag, end_adj in [("excl+1", 0), ("incl", -1)]:
+                    fb_attempts = [("excl+1", 0, do_video_only),
+                                   ("incl", -1, do_video_only)]
+                    if do_video_only:
+                        # mediaType undocumented for CreateTimelineFromClips —
+                        # retry without it if rejected
+                        fb_attempts += [("excl+1 -mt", 0, False),
+                                        ("incl -mt", -1, False)]
+                    for tag, end_adj, use_mt in fb_attempts:
                         fb_info[0]["endFrame"] = row["src_out"] + end_adj
+                        if use_mt:
+                            fb_info[0]["mediaType"] = 1
+                        else:
+                            fb_info[0].pop("mediaType", None)
                         try:
                             result = self._media_pool.CreateTimelineFromClips(
                                 final_name, fb_info)
@@ -2236,6 +2603,7 @@ class Clipper:
 
                 if result:
                     added += 1
+                    reel_names.append(final_name)
                     if used_fallback:
                         self._log(f"  ✓  {final_name}  (compound clip via fallback)")
                         if do_video_only:
@@ -2304,15 +2672,32 @@ class Clipper:
             for seq_num, (row, mpi) in enumerate(valid, 1):
                 final_name = row["subclip_name"]
                 final_name = _order_prefix(row, seq_num) + final_name
+                # PATH B creates a TIMELINE per clip — pre-uniquify so Resolve
+                # never pops its blocking duplicate-name dialog (10 clicks of
+                # OK on a re-run, as discovered in production)
+                _orig_nm   = final_name
+                final_name = self._unique_tl_name(final_name, existing_tls)
+                if final_name != _orig_nm:
+                    self._log(f"  '{_orig_nm}' exists — creating as '{final_name}'")
 
                 clip_info = [{"mediaPoolItem": mpi,
                               "startFrame":   row["src_in"],
                               "endFrame":     row["src_out"] + 1}]
                 result = None
                 # Try exclusive endFrame first (consistent with CreateSubClip convention)
-                for tag, end_f in [("excl+1", row["src_out"] + 1),
-                                   ("incl", row["src_out"])]:
+                tl_attempts = [("excl+1", row["src_out"] + 1, do_video_only),
+                               ("incl",   row["src_out"],     do_video_only)]
+                if do_video_only:
+                    # mediaType undocumented for CreateTimelineFromClips —
+                    # retry without it if rejected
+                    tl_attempts += [("excl+1 -mt", row["src_out"] + 1, False),
+                                    ("incl -mt",   row["src_out"],     False)]
+                for tag, end_f, use_mt in tl_attempts:
                     clip_info[0]["endFrame"] = end_f
+                    if use_mt:
+                        clip_info[0]["mediaType"] = 1
+                    else:
+                        clip_info[0].pop("mediaType", None)
                     try:
                         result = self._media_pool.CreateTimelineFromClips(
                             final_name, clip_info)
@@ -2324,6 +2709,7 @@ class Clipper:
 
                 if result:
                     added += 1
+                    reel_names.append(final_name)
                     self._log(f"  ✓  {final_name}  (compound clip)")
                     if do_markers:
                         try:
@@ -2364,6 +2750,11 @@ class Clipper:
 
             self._log(f"Timeline restored → '{_orig_tl.GetName() if _orig_tl else '?'}'")
 
+        # ── Build Reel: assemble the created clips into one sequence ──────
+        reel_info = None
+        if self._reel_var.get() and reel_names and not self._abort_flag:
+            reel_info = self._build_reel(dest_folder, reel_names, track_lbl)
+
         self._end_batch()
 
         aborted = self._abort_flag
@@ -2374,6 +2765,11 @@ class Clipper:
             f"Skipped (no media): {skipped}\n"
             f"Failed:             {failed}"
         )
+        if reel_info:
+            r_name, r_placed, r_total = reel_info
+            summary += f"\n\nReel: {r_name}\nClips in reel: {r_placed} of {r_total}"
+        elif self._reel_var.get() and reel_names and self._abort_flag:
+            summary += "\n\nReel skipped (batch aborted)."
         if aborted:
             remaining = n_valid - added - failed - skipped
             if remaining > 0:
@@ -2389,6 +2785,166 @@ class Clipper:
             messagebox.showinfo(title, summary, parent=self.root)
         self._log(f"{status_word} ({label}) — {added} added, {skipped} skipped, {failed} failed.")
         self._schedule_preview()
+
+    def _build_reel(self, dest_folder, names, track_lbl):
+        """Assemble the just-created clips / sub-sequences into ONE reel
+        timeline, in creation order, by appending their media pool items.
+        Works for both native subclips and per-clip timelines (timelines are
+        media pool items too — they append as nested sequences, which also
+        carries the marker-derived names onto the reel's clips).
+        Returns (reel_name, placed, total) or None."""
+        self._log(f"Build Reel: assembling {len(names)} clip(s)…")
+
+        # Map the destination bin's items by name (fresh list — the batch
+        # just created/moved everything into this bin)
+        try:
+            pool_items = dest_folder.GetClipList() or []
+        except Exception as exc:
+            self._log(f"  ✗ reel: could not read bin contents: {exc}")
+            return None
+        by_name = {}
+        for it in pool_items:
+            try:
+                by_name.setdefault(it.GetName(), it)
+            except Exception:
+                continue
+
+        ordered = [(n, by_name[n]) for n in names if n in by_name]
+        missing = [n for n in names if n not in by_name]
+        if missing:
+            self._log(f"  ⚠ reel: not found in bin: {', '.join(missing[:5])}"
+                      + (" …" if len(missing) > 5 else ""))
+        if not ordered:
+            self._log("  ✗ reel: nothing to assemble")
+            return None
+
+        # Remember the user's timeline so we can restore it afterwards
+        _orig_tl = None
+        try:
+            _orig_tl = self._project.GetCurrentTimeline()
+        except Exception:
+            pass
+        try:
+            self._media_pool.SetCurrentFolder(dest_folder)
+        except Exception:
+            pass
+
+        # Create the reel timeline — pre-uniquify the name (attempting a
+        # taken name pops Resolve's blocking duplicate dialog)
+        tl_name   = self._timeline.GetName() if self._timeline else "Clipper"
+        base      = f"{tl_name} — {track_lbl} REEL"
+        reel_name = self._unique_tl_name(base, self._existing_timeline_names())
+        if reel_name != base:
+            self._log(f"  reel: '{base}' exists — creating as '{reel_name}'")
+        reel = None
+        try:
+            reel = self._media_pool.CreateEmptyTimeline(reel_name)
+        except Exception as exc:
+            self._log(f"  reel: CreateEmptyTimeline('{reel_name}') exception: {exc}")
+        if not reel:
+            self._log("  ✗ reel: could not create the reel timeline")
+            if _orig_tl:
+                try:
+                    self._project.SetCurrentTimeline(_orig_tl)
+                except Exception:
+                    pass
+            return None
+
+        # Appends land on the CURRENT timeline — switch and verify
+        switched = False
+        try:
+            self._project.SetCurrentTimeline(reel)
+            _cur = self._project.GetCurrentTimeline()
+            switched = bool(_cur) and _cur.GetName() == reel_name
+        except Exception as exc:
+            self._log(f"  ⚠ reel: SetCurrentTimeline: {exc}")
+        if not switched:
+            self._log("  ✗ reel: could not switch to the reel timeline — aborting "
+                      "assembly (appends would land on the wrong timeline)")
+            if _orig_tl:
+                try:
+                    self._project.SetCurrentTimeline(_orig_tl)
+                except Exception:
+                    pass
+            return (reel_name, 0, len(ordered))
+
+        def _vcount():
+            try:
+                total = 0
+                for vi in range(1, int(reel.GetTrackCount("video") or 0) + 1):
+                    total += len(reel.GetItemListInTrack("video", vi) or [])
+                return total
+            except Exception:
+                return -1
+
+        def _reel_end_frame():
+            """Absolute end frame of the reel's content (start frame if empty)."""
+            try:
+                items = []
+                for vi in range(1, int(reel.GetTrackCount("video") or 0) + 1):
+                    items += list(reel.GetItemListInTrack("video", vi) or [])
+                if items:
+                    return max(int(it.GetEnd()) for it in items)
+                return int(reel.GetStartFrame() or 0)
+            except Exception:
+                return None
+
+        placed = 0
+        before = _vcount()
+        for i, (nm, mpi) in enumerate(ordered):
+            # Appending a TIMELINE into a timeline doesn't advance the insert
+            # point like a clip does — append #2 tries to land on top of #1
+            # and Resolve silently declines. So: plain append first, then an
+            # explicit recordFrame at the reel's end, then seek-playhead-to-
+            # end and retry. Each attempt is verified by item count.
+            end_abs  = _reel_end_frame()
+            variants = [("plain", [mpi])]
+            if end_abs is not None:
+                variants.append(("recordFrame",
+                                 [{"mediaPoolItem": mpi,
+                                   "recordFrame":  end_abs,
+                                   "trackIndex":   1}]))
+                variants.append(("seek+plain", "SEEK"))
+            ok = False
+            for tag, arg in variants:
+                if arg == "SEEK":
+                    try:
+                        reel.SetCurrentTimecode(frames_to_tc(end_abs, self._fps))
+                    except Exception:
+                        pass
+                    arg = [mpi]
+                try:
+                    r = self._media_pool.AppendToTimeline(arg)
+                except Exception as exc:
+                    self._log(f"  reel append[{i}]({tag}) '{nm}' exception: {exc}")
+                    continue
+                now = _vcount()
+                ok = now > before
+                self._log(f"  reel append[{i}]({tag}) '{nm}' → "
+                          f"{'placed' if ok else 'NO'} (items {before}→{now})")
+                if ok:
+                    placed += 1
+                    before = now
+                    break
+            self.root.update()
+            if self._abort_flag:
+                self._log(f"⛔  Reel assembly aborted at {placed} of {len(ordered)}.")
+                break
+
+        # Video only cleanup on the reel itself (sources are already
+        # stripped; this handles the reel's own default audio track)
+        if self._video_only_var.get():
+            n_audio = self._strip_audio_tracks(reel)
+            self._log(f"  reel: Video only — removed {n_audio} audio track(s)")
+
+        if _orig_tl:
+            try:
+                self._project.SetCurrentTimeline(_orig_tl)
+            except Exception:
+                pass
+
+        self._log(f"✓  Reel '{reel_name}' — {placed} of {len(ordered)} clip(s) placed")
+        return (reel_name, placed, len(ordered))
 
     # ── Handles helpers ───────────────────────────────────────────────────
 
@@ -2421,6 +2977,37 @@ class Clipper:
         ifps = int(round(self._fps)) or 24
         if mm < 60 and ss < 60 and ff < ifps:
             var.set(f"{hh:02d}:{mm:02d}:{ss:02d}:{ff:02d}")
+
+    def _on_handles_toggle(self):
+        """Add handles on/off — greys the whole handles cluster when off."""
+        on    = self._handles_on.get()
+        state = "normal" if on else "disabled"
+        for w in self._hdl_counter.winfo_children():
+            try:
+                w.config(state=state)
+            except Exception:
+                pass
+        for w in (self._hdl_custom_cb, self._hdl_default_btn):
+            try:
+                w.config(state=state)
+            except Exception:
+                pass
+        if not on and self._handles_custom.get():
+            self._handles_custom.set(False)
+            self._on_handles_mode()   # hide the custom head/tail row
+        self._schedule_preview()
+
+    def _save_handles_default(self):
+        """★ Make Default — remember the current handles values across launches."""
+        p = _load_prefs()
+        p.update({
+            "handles": int(self._handles_var.get() or 0),
+            "head":    int(self._head_handles_var.get() or 0),
+            "tail":    int(self._tail_handles_var.get() or 0),
+        })
+        _save_prefs(p)
+        self._log(f"★ Handles default saved — {p['handles']} frames each side"
+                  f" (custom head {p['head']} / tail {p['tail']})")
 
     def _on_handles_mode(self):
         """Show or hide the custom head/tail row."""

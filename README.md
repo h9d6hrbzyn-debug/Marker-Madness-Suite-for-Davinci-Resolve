@@ -124,7 +124,7 @@ Reel Time Plus is a running-time calculator for TV and film editors. Create name
 
 **Fully Standalone** — Reel Time Plus runs as a native app on macOS (Intel + Apple Silicon) and Windows with no DaVinci Resolve connection required, no Python install, nothing to configure. Also available as a `.py` script for the Resolve scripts menu.
 
-### <img src="https://resolve-tools.com/images/icons/icon-clipper.png" width="28" style="vertical-align:middle;"> Clipper v1.2
+### <img src="https://resolve-tools.com/images/icons/icon-clipper.png" width="28" style="vertical-align:middle;"> Clipper v1.3
 *One click. Every clip. Done.*
 
 You've got a finished cut on V1 — or a selects reel on V2 — and you want every clip turned into a subclip and organized into a Media Pool bin. You could right-click each one, fill in the in/out points, name it, choose the bin... forty times. Or you could open Clipper, pick the track, pick the bin, and hit Create.
