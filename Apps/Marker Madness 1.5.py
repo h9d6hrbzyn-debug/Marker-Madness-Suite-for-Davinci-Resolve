@@ -4082,7 +4082,7 @@ class ExportFrameOptionsDialog(tk.Toplevel):
 # ---------------------------------------------------------------------------
 
 APP_TITLE   = "Marker Madness"
-APP_VERSION = "1.4.5"
+APP_VERSION = "1.5"
 
 class MarkerMadness:
     def __init__(self, root: tk.Tk):
@@ -4341,6 +4341,20 @@ class MarkerMadness:
         # Toolbar row 1 — actions
         tb1 = tk.Frame(self.root, bg=BG, pady=4)
         tb1.pack(fill="x", padx=12)
+
+        # Mode toggle — Timeline ⇄ Media Pool (source clip markers, v1.5)
+        self._mode = "timeline"
+        mode_col = tk.Frame(tb1, bg=BG)
+        mode_col.pack(side="left", padx=(0, 10))
+        self._btn_mode_tl = TBtn(mode_col, text="◉ Timeline", bg=ACCENT, fg=BG,
+                                 padx=8, pady=2, font=F_SMALL,
+                                 command=lambda: self._set_mode("timeline"))
+        self._btn_mode_tl.pack(fill="x", pady=(0, 2))
+        self._btn_mode_pool = TBtn(mode_col, text="○ Media Pool", bg=BTN, fg=DIM,
+                                   padx=8, pady=2, font=F_SMALL,
+                                   command=lambda: self._set_mode("pool"))
+        self._btn_mode_pool.pack(fill="x")
+        tk.Frame(tb1, bg=BTN_HOV, width=1).pack(side="left", fill="y", padx=(0, 8))
 
         TBtn(tb1, text="+ Add",            command=self._add_marker_at_playhead,
              bg=ACCENT, fg=BG).pack(side="left", padx=3)
@@ -5045,8 +5059,122 @@ class MarkerMadness:
 
     # ── Data loading ──────────────────────────────────────────────────────
 
+    # ── Mode toggle: Timeline ⇄ Media Pool (v1.5) ─────────────────────────
+
+    def _set_mode(self, mode):
+        if mode == getattr(self, "_mode", "timeline"):
+            return
+        self._mode = mode
+        self._update_mode_buttons()
+        self._refresh()
+
+    def _update_mode_buttons(self):
+        for btn, m, label in ((self._btn_mode_tl,   "timeline", "Timeline"),
+                              (self._btn_mode_pool, "pool",     "Media Pool")):
+            active = (self._mode == m)
+            bg = ACCENT if active else BTN
+            btn.config(bg=bg, fg=BG if active else DIM,
+                       text=("◉ " if active else "○ ") + label)
+            # TBtn freezes its original bg in the hover bindings — re-bind
+            # so the toggled color survives mouse-over
+            btn.unbind("<Enter>")
+            btn.unbind("<Leave>")
+            btn.bind("<Enter>", lambda _e, b=btn: b.config(bg=BTN_HOV))
+            btn.bind("<Leave>", lambda _e, b=btn, c=bg: b.config(bg=c))
+
+    def _pool_mode_block(self, feature):
+        """Guard for timeline-only features. True = blocked (caller returns)."""
+        if getattr(self, "_mode", "timeline") != "pool":
+            return False
+        self._mb(messagebox.showinfo, "Media Pool mode",
+                 f"{feature} isn't available in Media Pool mode — "
+                 "switch back to Timeline mode to use it.")
+        return True
+
+    def _fresh_media_pool(self):
+        """Re-fetch a live MediaPool proxy. Returns (media_pool, error_str)."""
+        if not self._resolve:
+            return None, "Not connected to Resolve."
+        try:
+            pm = self._resolve.GetProjectManager()
+            proj = pm.GetCurrentProject() if pm else None
+            if proj is None:
+                return None, "No project open."
+            mp = proj.GetMediaPool()
+            if mp is None:
+                return None, "GetMediaPool() returned None."
+            self._project = proj
+            return mp, ""
+        except Exception as exc:
+            return None, str(exc)
+
+    def _refresh_pool(self):
+        """Media Pool mode: load markers from the clip(s) selected in the pool.
+        frameIds are SOURCE-relative — display TC uses each clip's own
+        Start TC + FPS, never the timeline conversion path."""
+        markers = []
+        mp, err = self._fresh_media_pool()
+        clips = []
+        if mp:
+            try:
+                clips = mp.GetSelectedClips() or []
+            except Exception as exc:
+                err = str(exc)
+        if isinstance(clips, dict):    # some Resolve builds return a dict
+            clips = [c for c in clips.values() if c]
+
+        for ci, mpi in enumerate(clips):
+            try:
+                raw       = mpi.GetMarkers() or {}
+                clip_name = mpi.GetName() or "Untitled"
+                try:
+                    fps = float(mpi.GetClipProperty("FPS") or 0) or self._fps
+                except Exception:
+                    fps = self._fps
+                try:
+                    start_tc  = mpi.GetClipProperty("Start TC") or "00:00:00:00"
+                    src_start = tc_to_frames(start_tc, fps)
+                except Exception:
+                    src_start = 0
+            except Exception:
+                continue
+            for mf, m in raw.items():
+                rec = self._make_record(
+                    mtype="Source",
+                    timeline_frame=mf,      # source-relative; keeps sort sane
+                    marker_frame=mf,
+                    color=m.get("color", "Blue"),
+                    name=m.get("name", ""),
+                    note=m.get("note", ""),
+                    duration=m.get("duration", 1),
+                    clip_name=clip_name,
+                    track_type="",
+                    track_index=0,
+                    timeline_item=None,
+                    uid=f"s_{ci}_{mf}",
+                )
+                rec["mpi"]       = mpi
+                rec["src_fps"]   = fps
+                rec["src_start"] = src_start
+                markers.append(rec)
+
+        self._all_markers = markers
+        self._by_id       = {r["id"]: r for r in markers}
+        self._tl_frames   = set()
+        self._refresh_track_filter_values()
+        self._populate_table()
+        n = len(clips)
+        if n == 0:
+            self._fps_var.set("Media Pool mode — select clip(s) in the pool, "
+                              "then ↻ Refresh" + (f"  ⚠ {err}" if err else ""))
+        else:
+            self._fps_var.set(f"Media Pool mode — {n} clip{'s' if n != 1 else ''} selected")
+
     def _refresh(self):
         self._close_inline()
+        if getattr(self, "_mode", "timeline") == "pool":
+            self._refresh_pool()
+            return
         if not self._get_timeline():
             self._all_markers = []
             self._by_id       = {}
@@ -5203,9 +5331,12 @@ class MarkerMadness:
 
     @staticmethod
     def _track_label(rec):
-        """'Ruler' for timeline markers, else V#/A# from the record's track."""
+        """'Ruler' for timeline markers, else V#/A# from the record's track.
+        Source (Media Pool) markers have no track — labeled '—'."""
         if rec["type"] == "Timeline":
             return "Ruler"
+        if not rec.get("track_type"):
+            return "—"
         prefix = "V" if rec["track_type"] == "video" else "A"
         return f"{prefix}{rec['track_index']}"
 
@@ -5281,10 +5412,16 @@ class MarkerMadness:
                 if search_f not in haystack:
                     continue
 
-            tc  = frames_to_tc(rec["timeline_frame"] + self._start_frame, self._fps)
+            if rec["type"] == "Source":
+                # Source markers live in the clip's own timebase
+                frame_disp = rec["marker_frame"] + rec.get("src_start", 0)
+                tc = frames_to_tc(frame_disp, rec.get("src_fps", self._fps))
+            else:
+                frame_disp = rec["timeline_frame"] + self._start_frame
+                tc = frames_to_tc(frame_disp, self._fps)
             tag_color = f"c_{rec['color'].lower()}"
             tag_type  = "tl_row" if rec["type"] == "Timeline" else "clip_row"
-            label     = "TL" if rec["type"] == "Timeline" else "Clip"
+            label     = {"Timeline": "TL", "Clip": "Clip"}.get(rec["type"], "Src")
 
             cif = rec["clip_in_frame"]
             cof = rec["clip_out_frame"]
@@ -5297,7 +5434,7 @@ class MarkerMadness:
             self._tree.insert("", "end", iid=rec["id"],
                               text="",
                               image=self._color_imgs.get(rec["color"], self._color_imgs[""]),
-                              values=(label, rec["timeline_frame"] + self._start_frame, tc,
+                              values=(label, frame_disp, tc,
                                       rec["color"], rec["name"], rec["note"],
                                       rec["clip_name"], rec["duration"],
                                       clip_in_tc, clip_out_tc, clip_dur_f, clip_dur_t),
@@ -5355,6 +5492,8 @@ class MarkerMadness:
             self._exchange_dlg.lift()
 
     def _import_rows_from_exchange(self, rows: list, source_label: str = "Exchange"):
+        if self._pool_mode_block("Marker Exchange import"):
+            return
         """Import pre-converted rows from a Marker Exchange source.
 
         Each row must be a dict with:
@@ -5841,6 +5980,16 @@ class MarkerMadness:
     def _write_marker(self, rec, color, name, note, duration, custom):
         """Delete and recreate a marker (Resolve has no direct update API).
         Always re-fetches fresh proxies. Returns (success, error_message)."""
+        if rec["type"] == "Source":
+            # Media Pool clip marker — operate directly on the MediaPoolItem;
+            # the generic add/delete helpers take any marker-capable object
+            mpi = rec.get("mpi")
+            if mpi is None:
+                return False, "Source clip reference lost — Refresh and retry."
+            self._resolve_delete_marker(mpi, rec["marker_frame"])
+            return self._resolve_add_marker(
+                mpi, rec["marker_frame"], color, name, note, duration, custom)
+
         timeline, err = self._fresh_timeline()
         if not timeline:
             return False, err
@@ -5961,6 +6110,8 @@ class MarkerMadness:
 
     def _add_marker_at_playhead(self):
         """Single-marker add flow — opens MarkerDialog at playhead."""
+        if self._pool_mode_block("Add at Playhead"):
+            return
         timeline, err = self._fresh_timeline()
         if not timeline:
             self._mb(messagebox.showwarning, "Not connected", err)
@@ -6155,6 +6306,8 @@ class MarkerMadness:
 
     def _stamp_track_dialog(self):
         """Open StampTrackDialog, then stamp every clip in the chosen track."""
+        if self._pool_mode_block("Batch Stamp"):
+            return
         timeline, err = self._fresh_timeline()
         if not timeline:
             self._mb(messagebox.showwarning, "Not connected", err)
@@ -6529,6 +6682,17 @@ class MarkerMadness:
                 continue
             if rec["type"] == "Timeline":
                 self._resolve_delete_marker(timeline, rec["timeline_frame"])
+            elif rec["type"] == "Source":
+                mpi = rec.get("mpi")
+                existing = {}
+                try:
+                    existing = (mpi.GetMarkers() or {}) if mpi else {}
+                except Exception:
+                    pass
+                if mpi and rec["marker_frame"] in existing:
+                    self._resolve_delete_marker(mpi, rec["marker_frame"])
+                else:
+                    phantom += 1
             else:
                 # Use the stored timeline_item reference — it knows exactly
                 # which track (video or audio) owns this marker.
@@ -6593,6 +6757,10 @@ class MarkerMadness:
         for rec in targets:
             if rec["type"] == "Timeline":
                 self._resolve_delete_marker(timeline, rec["timeline_frame"])
+            elif rec["type"] == "Source":
+                mpi = rec.get("mpi")
+                if mpi:
+                    self._resolve_delete_marker(mpi, rec["marker_frame"])
             else:
                 item = rec.get("timeline_item") or self._find_clip_at_frame(
                     timeline, rec["timeline_frame"],
@@ -6606,6 +6774,8 @@ class MarkerMadness:
     # ── Promote: copy / move clip markers to timeline ─────────────────────
 
     def _promote(self, move: bool):
+        if self._pool_mode_block("Copy/Move to Timeline"):
+            return
         sel = self._tree.selection()
         clips = [self._by_id[iid] for iid in sel
                  if self._by_id.get(iid, {}).get("type") == "Clip"]
@@ -6686,6 +6856,8 @@ class MarkerMadness:
 
     def _demote(self, move: bool):
         """Copy or move selected timeline markers onto a clip in a chosen track."""
+        if self._pool_mode_block("Copy/Move to Clip"):
+            return
         sel = self._tree.selection()
         tl_markers = [self._by_id[iid] for iid in sel
                       if self._by_id.get(iid, {}).get("type") == "Timeline"]
@@ -6799,6 +6971,8 @@ class MarkerMadness:
     def _transfer_track(self, move: bool):
         """Copy or move selected clip markers onto the clip at the same
         timeline position in another track (e.g. V1 → V4)."""
+        if self._pool_mode_block("Copy/Move to Track"):
+            return
         sel = self._tree.selection()
         clips = [self._by_id[iid] for iid in sel
                  if self._by_id.get(iid, {}).get("type") == "Clip"]
@@ -6913,6 +7087,8 @@ class MarkerMadness:
 
     def _nudge_markers(self):
         """Move selected markers forward or backward by the nudge spinbox value."""
+        if self._pool_mode_block("Nudge"):
+            return
         offset = self._nudge_var.get()
         if offset == 0:
             return
@@ -7382,6 +7558,8 @@ class MarkerMadness:
 
     def _batch_export_full_res_frames(self):
         """Grab and export a PNG frame for every visible or selected marker."""
+        if self._pool_mode_block("Batch Export Frames"):
+            return
         if not self._all_markers:
             self._mb(messagebox.showinfo, "Batch Export", "No markers to export.")
             return
@@ -7801,6 +7979,8 @@ class MarkerMadness:
     # ── CSV import ────────────────────────────────────────────────────────
 
     def _import_csv(self):
+        if self._pool_mode_block("Import CSV"):
+            return
         timeline, err = self._fresh_timeline()
         if not timeline:
             self._mb(messagebox.showwarning, "Not connected", err)
@@ -7926,6 +8106,8 @@ class MarkerMadness:
 
     def _seek_to_marker(self, rec: dict):
         """Move the Resolve playhead to the marker's timeline position."""
+        if rec.get("type") == "Source":
+            return    # no API to move the source viewer's playhead
         if not self._timeline:
             return
         tc = frames_to_tc(rec["timeline_frame"] + self._start_frame, self._fps)
@@ -7936,6 +8118,8 @@ class MarkerMadness:
 
     def _jump_to_marker(self):
         """Manual Jump to Marker button — seeks regardless of the auto-jump toggle."""
+        if getattr(self, "_mode", "timeline") == "pool":
+            return
         sel = self._tree.selection()
         if not sel:
             self._mb(messagebox.showinfo, "Jump to Marker", "Select a marker first.")
@@ -7951,6 +8135,8 @@ class MarkerMadness:
     # ── Frame grab & preview ──────────────────────────────────────────────
 
     def _grab_frame(self, rec=None):
+        if self._pool_mode_block("Grab Frame"):
+            return
         """Grab the frame at the selected (or supplied) marker and show a preview.
 
         When called by the button, rec=None and the selection is used.
@@ -8110,6 +8296,8 @@ class MarkerMadness:
         self._img_canvas.create_image(cw // 2, ch // 2, image=img, anchor="center")
 
     def _export_frame(self):
+        if self._pool_mode_block("Export Frame"):
+            return
         if not self._grab_path:
             self._mb(messagebox.showinfo, "Export Frame",
                      "Click Grab Frame first to capture a preview.")

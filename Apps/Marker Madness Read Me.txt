@@ -1,4 +1,4 @@
-Marker Madness v1.4.5
+Marker Madness v1.5
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -9,6 +9,20 @@ Add, edit, search, filter, color-code, and bulk-edit markers from a
 single panel. Export to HTML or CSV, detect shot changes between two
 exports, and exchange markers bidirectionally with Premiere Pro and
 Avid Media Composer.
+
+WHAT'S NEW IN 1.5
+- New Media Pool mode — a Timeline ⇄ Media Pool toggle. Select clip(s)
+  in the Media Pool (the same selection that loads the source viewer)
+  and the table shows their source-clip markers. Batch recolor, batch
+  rename, edit names/notes, and delete — across every selected clip at
+  once. Changes appear in the source viewer instantly.
+- Marker timecodes in Media Pool mode use each clip's own Start TC and
+  frame rate.
+- Not available in Media Pool mode (Resolve provides no API for the
+  source viewer's playhead or frame grabs): Jump to Marker, Add at
+  Playhead, Batch Stamp, frame grabs/exports, the Transfer buttons,
+  Nudge, and CSV / Marker Exchange import. The buttons tell you
+  politely instead of failing.
 
 WHAT'S NEW IN 1.4.5
 - New Copy→Track / Move→Track — transfer clip markers straight from
@@ -31,7 +45,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Marker Madness 1.4.5.py" to:
+1. Copy "Marker Madness 1.5.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -41,7 +55,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Marker Madness 1.4.5
+   Workspace → Scripts → Utility → Marker Madness 1.5
 
 FULL DOCUMENTATION
    resolve-tools.com/marker-madness-guide
