@@ -375,6 +375,7 @@ SEL_BG  = "#505050"
 RED     = "#E05C5C"
 GREEN   = "#6DBF87"
 PURPLE  = "#B07CC6"
+POOL_BLUE = "#3B9FD4"   # Media Pool mode hue — distinct from timeline orange
 DIM     = "#707070"
 
 F_MAIN  = ("Avenir Next", 12)
@@ -4288,6 +4289,12 @@ class MarkerMadness:
         tk.Label(top, text=f"v{APP_VERSION}", fg=DIM, bg=PANEL,
                  font=("Avenir Next", 10)).pack(side="left", pady=(4, 0))
 
+        # Mode badge — always-visible, hue-coded (orange = Timeline,
+        # blue = Media Pool) so the active mode can't get lost
+        self._mode_badge = tk.Label(top, text="◉ TIMELINE", fg=BG, bg=ACCENT,
+                                    font=F_BOLD, padx=12, pady=3)
+        self._mode_badge.pack(side="left", padx=(14, 0), pady=(2, 0))
+
         # Pack right-side buttons before status_area so they're never squeezed out
         TBtn(top, text="⟳  Refresh", command=self._refresh, bg=ACCENT, fg=BG).pack(side="right", padx=8)
         self._main_undo_btn = TBtn(top, text="↩ Undo",
@@ -5108,14 +5115,15 @@ class MarkerMadness:
         if mode == getattr(self, "_mode", "timeline"):
             return
         self._mode = mode
-        self._update_mode_buttons()
+        self._update_mode_buttons(pulse=True)
         self._refresh()
 
-    def _update_mode_buttons(self):
+    def _update_mode_buttons(self, pulse=False):
+        pool = (self._mode == "pool")
         for btn, m, label in ((self._btn_mode_tl,   "timeline", "Timeline"),
                               (self._btn_mode_pool, "pool",     "Media Pool")):
             active = (self._mode == m)
-            bg = ACCENT if active else BTN
+            bg = (POOL_BLUE if m == "pool" else ACCENT) if active else BTN
             btn.config(bg=bg, fg=BG if active else DIM,
                        text=("◉ " if active else "○ ") + label)
             # TBtn freezes its original bg in the hover bindings — re-bind
@@ -5124,6 +5132,24 @@ class MarkerMadness:
             btn.unbind("<Leave>")
             btn.bind("<Enter>", lambda _e, b=btn: b.config(bg=BTN_HOV))
             btn.bind("<Leave>", lambda _e, b=btn, c=bg: b.config(bg=c))
+        color = POOL_BLUE if pool else ACCENT
+        self._mode_badge.config(text="◉ MEDIA POOL" if pool else "◉ TIMELINE",
+                                bg=color, fg=BG)
+        if pulse:
+            self._pulse_badge(color)
+
+    def _pulse_badge(self, color, flashes=6):
+        """Brief attention pulse on the mode badge after a mode switch."""
+        def _step(i):
+            try:
+                if not self._mode_badge.winfo_exists():
+                    return
+                self._mode_badge.config(bg=("#ffffff" if i % 2 else color))
+            except Exception:
+                return
+            if i > 0:
+                self.root.after(160, lambda: _step(i - 1))
+        _step(flashes)
 
     def _pool_mode_block(self, feature):
         """Guard for timeline-only features. True = blocked (caller returns)."""
