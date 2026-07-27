@@ -8506,29 +8506,37 @@ def main():
         y     = min(max(py - int(h * 0.38), 28), max(28, sh - h - 40))
         root.geometry(f"{w}x{h}+{x}+{y}")
 
-        def _grow_to_fit():
-            # The side panel has pack_propagate(False), so its reqheight
-            # ignores its children — measure the real content height as the
-            # bottom edge of its lowest child instead. If content is clipped,
-            # grow the window by the shortfall (screen permitting) and
-            # re-anchor so the bottom edge stays on screen.
-            try:
-                panel = app._side_panel
-                kids  = panel.winfo_children()
-                if not kids:
-                    return
-                needed = max(k.winfo_y() + k.winfo_reqheight()
-                             for k in kids) + 12   # breathing room
-                short = needed - panel.winfo_height()
-                if short <= 0:
-                    return
-                new_h = min(root.winfo_height() + short, sh - 60)
-                new_y = max(25, min(root.winfo_y(), sh - new_h - 35))
-                root.geometry(f"{root.winfo_width()}x{new_h}"
-                              f"+{root.winfo_x()}+{new_y}")
-            except Exception:
-                pass
-        root.after(250, _grow_to_fit)
+    def _grow_to_fit():
+        # The side panel has pack_propagate(False), so its reqheight
+        # ignores its children — measure the real content height as the
+        # bottom edge of its lowest child instead. If content is clipped,
+        # grow the window by the shortfall (screen permitting) and
+        # re-anchor so the bottom edge stays on screen.
+        try:
+            panel = app._side_panel
+            kids  = panel.winfo_children()
+            if not kids:
+                return
+            needed = max(k.winfo_y() + k.winfo_reqheight()
+                         for k in kids) + 20   # breathing room
+            short = needed - panel.winfo_height()
+            if short <= 0:
+                return
+            scr_h = root.winfo_screenheight()
+            new_h = min(root.winfo_height() + short, scr_h - 60)
+            new_y = max(25, min(root.winfo_y(), scr_h - new_h - 35))
+            root.geometry(f"{root.winfo_width()}x{new_h}"
+                          f"+{root.winfo_x()}+{new_y}")
+        except Exception:
+            pass
+
+    # Layout (fonts, table, thumbnails) keeps settling for a moment after
+    # launch — a single early measurement under-reports and leaves the
+    # bottom of the side panel slightly clipped. Re-check a few times;
+    # each pass is a no-op once everything fits. Runs for saved geometries
+    # too: grow-only, never shrinks.
+    for _delay in (250, 900, 1800):
+        root.after(_delay, _grow_to_fit)
 
     root.deiconify()                 # reveal at the correct position
     root.mainloop()
