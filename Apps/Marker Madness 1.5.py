@@ -4993,7 +4993,25 @@ class MarkerMadness:
 
     def _poll_timeline(self):
         try:
-            if self._resolve:
+            # Don't auto-refresh out from under the user: skip the cycle
+            # while an inline editor or a modal dialog is active
+            busy = bool(self._inline_widget)
+            try:
+                busy = busy or bool(self.root.grab_current())
+            except Exception:
+                pass
+
+            if busy:
+                pass
+            elif getattr(self, "_mode", "timeline") == "pool":
+                # Pool mode: watch the Media Pool selection AND its markers —
+                # click a different clip, or add/edit markers in the source
+                # viewer, and the table follows within a few seconds
+                sig = self._pool_signature()
+                if sig is not None and sig != getattr(self, "_last_pool_sig", None):
+                    self._last_pool_sig = sig
+                    self._refresh()
+            elif self._resolve:
                 pm = self._resolve.GetProjectManager()
                 if pm:
                     proj = pm.GetCurrentProject()
@@ -5008,6 +5026,31 @@ class MarkerMadness:
         except Exception:
             pass
         self.root.after(4000, self._poll_timeline)
+
+    def _pool_signature(self):
+        """Cheap change signature for pool mode: the selected clips plus the
+        full content of their markers. Any difference → auto-refresh."""
+        mp, _err = self._fresh_media_pool()
+        if not mp:
+            return None
+        try:
+            clips = mp.GetSelectedClips() or []
+        except Exception:
+            return None
+        if isinstance(clips, dict):
+            clips = [c for c in clips.values() if c]
+        sig = []
+        for mpi in clips:
+            try:
+                ms = mpi.GetMarkers() or {}
+                sig.append((mpi.GetName(),
+                            tuple(sorted(
+                                (f, m.get("color", ""), m.get("name", ""),
+                                 m.get("note", ""), m.get("duration", 1))
+                                for f, m in ms.items()))))
+            except Exception:
+                continue
+        return tuple(sorted(sig))
 
     def _show_status_warning(self, msg: str):
         self._info_frame.pack_forget()
@@ -5169,6 +5212,8 @@ class MarkerMadness:
                               "then ↻ Refresh" + (f"  ⚠ {err}" if err else ""))
         else:
             self._fps_var.set(f"Media Pool mode — {n} clip{'s' if n != 1 else ''} selected")
+        # Sync the poll signature so this refresh doesn't re-trigger itself
+        self._last_pool_sig = self._pool_signature()
 
     def _refresh(self):
         self._close_inline()
