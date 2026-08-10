@@ -1,4 +1,4 @@
-Clip Renamer Pro v2.0
+Clip Renamer Pro v2.1
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -8,12 +8,30 @@ Clip Renamer Pro renames clips in your DaVinci Resolve Media Pool in
 bulk. Build a custom name from tokens — scene, take, camera, description,
 and more — preview the result before committing, and apply in one click.
 
+WHAT'S NEW IN 2.1
+- New Version suffix — tick "Version" to append a version tag to every
+  name in one pass, instead of typing _v1 on each clip by hand. Set the
+  tag (default "_v"), the number, and how many digits:
+      _v1     tag "_v", no 1, digits 1
+      _v01    tag "_v", no 1, digits 2
+      -v003   tag "-v", no 3, digits 3
+  The version is always appended LAST — after the counter, and after
+  anything the "After counter" option adds — so it stays at the end of
+  the name where a version belongs.
+- Step now sits on the same line as Digits and Start, where it's easy
+  to find. Digits 3 / Start 10 / Step 10 gives 010, 020, 030 — numbering
+  with room to slot a shot in later.
+- Changed: Start is now the first number, not a multiplier. Previously
+  the first value was Start × Step, so "Start: 1, Step: 10" produced
+  010. Now Start means what it says — Start 10, Step 10 gives 010, 020,
+  030, and Start 10, Step 2 gives 010, 012, 014.
+
 REQUIREMENTS
 • DaVinci Resolve 18 or later
 • macOS
 
 INSTALLATION
-1. Copy "Clip Renamer Pro 2.0.py" to:
+1. Copy "Clip Renamer Pro 2.1.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -23,7 +41,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Clip Renamer Pro 2.0
+   Workspace → Scripts → Utility → Clip Renamer Pro 2.1
 
 FULL DOCUMENTATION
    resolve-tools.com/clip-renamer-pro-guide

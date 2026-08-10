@@ -1,4 +1,4 @@
-Marker Madness v1.5
+Marker Madness v1.6
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -7,8 +7,51 @@ WHAT IT DOES
 Marker Madness is a full-featured marker manager for DaVinci Resolve.
 Add, edit, search, filter, color-code, and bulk-edit markers from a
 single panel. Export to HTML or CSV, detect shot changes between two
-exports, and exchange markers bidirectionally with Premiere Pro and
-Avid Media Composer.
+exports, sync VFX shot data with clip metadata, and exchange markers
+bidirectionally with Premiere Pro and Avid Media Composer.
+
+WHAT'S NEW IN 1.6
+- New Version suffix in Batch Rename — tick "Version" to append a
+  version tag to every marker name in one pass. Set the tag (default
+  "_v"), the number, and the digits:
+      _v1     tag "_v", no 1, digits 1
+      _v01    tag "_v", no 1, digits 2
+      -v003   tag "-v", no 3, digits 3
+  Always appended LAST, after the counter and after anything the
+  "After counter" option adds. Combine with Find/Replace to strip a
+  file extension and stamp the version in a single pass:
+      find ".mov" → replace "" , Version on  →  shot01_v1
+- Changed: the Counter's Start is now the first number, not a
+  multiplier. Previously the first value was Start × Step, so
+  "Start: 1, Step: 10" produced 010. Now Start means what it says —
+  Start 10 / Step 10 gives 010, 020, 030, and Start 10 / Step 2 gives
+  010, 012, 014.
+- New VFX designation — select any markers and hit "◈ Mark VFX" to
+  flag them as VFX shots. The flag is stored in each marker's
+  customData, so it is invisible in Resolve and never touches the
+  marker's name, note, color or duration. A new VFX column and a
+  VFX filter ("VFX only" / "Non-VFX") scope the whole app — table,
+  CSV export, HTML report and batch rename all follow the filter.
+- New "→ Metadata" — writes VFX-flagged markers into their source
+  clips' metadata, where Data Burn-In can read them:
+      marker name → VFX Shot #
+      marker note → VFX Notes
+      all names on a clip → VFX Markers
+- New "← Metadata" — the reverse. Reads VFX Shot # / VFX Notes off
+  every clip in the timeline and lays a VFX-flagged marker on each
+  instance. Clips that already carry a VFX marker are skipped, so
+  repeat runs are safe.
+- Collision reporting — metadata lives on the source clip, not on the
+  timeline instance, so one plate used several times can only hold one
+  VFX Shot #. Rather than letting the last write win, "→ Metadata"
+  reports those clips, leaves VFX Shot # untouched, and writes every
+  number to VFX Markers. Marker Name burn-in still shows each instance
+  correctly.
+- Field names are configurable — set "vfx_fields" in prefs.json if
+  your show's metadata panel uses different field names.
+- Fixed: renaming or recoloring a marker no longer wipes its
+  customData. Every marker write now carries the existing payload
+  through instead of blanking it.
 
 WHAT'S NEW IN 1.5
 - New Media Pool mode — a Timeline ⇄ Media Pool toggle. Select clip(s)
@@ -45,7 +88,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Marker Madness 1.5.py" to:
+1. Copy "Marker Madness 1.6.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -55,7 +98,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Marker Madness 1.5
+   Workspace → Scripts → Utility → Marker Madness 1.6
 
 FULL DOCUMENTATION
    resolve-tools.com/marker-madness-guide

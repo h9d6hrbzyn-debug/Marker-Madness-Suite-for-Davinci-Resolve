@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Marker Madness 1.4.5 — DaVinci Resolve Marker Manager
-====================================================
+Marker Madness 1.6 — DaVinci Resolve Marker Manager
+===================================================
 A GUI tool to view, add, edit, delete, and export both timeline markers
 and clip-based markers in your current DaVinci Resolve timeline.
 
@@ -395,6 +395,7 @@ COLUMNS = [
     ("frame",      "Frame",     75,  "center", False, False),
     ("timecode",   "Marker TC",     110, "center", False, False),
     ("color",      "Color",          90, "center", False, False),
+    ("vfx",        "VFX",            46, "center", False, False),
     ("name",       "Name",          200, "w",      False, False),
     ("note",       "Note",          260, "w",      False, False),
     ("clip",       "Clip",          160, "w",      False, False),
@@ -414,6 +415,7 @@ SORT_KEY = {
     "frame":    lambda r: r.get("timeline_frame", 0),
     "timecode": lambda r: r.get("timeline_frame", 0),
     "color":    lambda r: r.get("color", ""),
+    "vfx":      lambda r: not r.get("vfx", False),   # flagged shots sort first
     "name":     lambda r: r.get("name", "").lower(),
     "note":     lambda r: r.get("note", "").lower(),
     "clip":     lambda r: r.get("clip_name", "").lower(),
@@ -429,6 +431,7 @@ HTML_COLUMNS = [
     ("type",      "Type"),
     ("timecode",  "Marker Timecode"),
     ("color",     "Color"),
+    ("vfx",       "VFX"),
     ("name",      "Name"),
     ("note",      "Note"),
     ("clip",      "Clip"),
@@ -443,6 +446,7 @@ DISPLAY_TO_HTML = {
     "mtype":      "type",
     "timecode":   "timecode",
     "color":      "color",
+    "vfx":        "vfx",
     "name":       "name",
     "note":       "note",
     "clip":       "clip",
@@ -508,6 +512,7 @@ CSV_COL_DEF = {
     "frame":      ("Frame",         lambda r, fps, sf: r["timeline_frame"] + sf),
     "timecode":   ("Timecode",      lambda r, fps, sf: frames_to_tc(r["timeline_frame"] + sf, fps)),
     "color":      ("Color",         lambda r, fps, sf: r["color"]),
+    "vfx":        ("VFX",           lambda r, fps, sf: "Yes" if r.get("vfx") else ""),
     "name":       ("Name",          lambda r, fps, sf: r["name"]),
     "note":       ("Note",          lambda r, fps, sf: r["note"]),
     "clip":       ("Clip",          lambda r, fps, sf: r["clip_name"]),
@@ -542,6 +547,77 @@ def tc_to_frames(tc: str, fps: float) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Marker customData — VFX designation payload
+#
+# Every marker carries a customData string that Resolve never shows in the UI
+# and never offers to Data Burn-In. Marker Madness uses it to flag a marker as
+# a VFX shot and to remember which source clip it belongs to, so metadata syncs
+# stay exact even after a shot is renamed.
+#
+# customData written by anything else is preserved verbatim under "raw" and put
+# back untouched when the VFX flag is cleared.
+# ---------------------------------------------------------------------------
+
+CD_NS  = "mm"     # our namespace inside the customData JSON object
+CD_VFX = "vfx"    # bool — this marker is a VFX shot
+CD_MID = "mid"    # source MediaPoolItem media ID
+
+
+def cd_decode(custom: str) -> dict:
+    """Parse a marker's customData into a dict. Never raises."""
+    if not custom:
+        return {}
+    try:
+        data = json.loads(custom)
+    except Exception:
+        # Foreign, non-JSON payload — keep it whole so we can put it back.
+        return {"raw": custom}
+    return data if isinstance(data, dict) else {"raw": custom}
+
+
+def cd_encode(data: dict) -> str:
+    """Serialize back to a customData string. Collapses to the original
+    foreign payload when we no longer hold anything of our own."""
+    if not data:
+        return ""
+    if set(data) == {"raw"}:
+        return data["raw"]
+    return json.dumps(data, separators=(",", ":"), sort_keys=True)
+
+
+def cd_is_vfx(custom: str) -> bool:
+    """True when this marker has been designated a VFX shot."""
+    mine = cd_decode(custom).get(CD_NS)
+    return bool(mine.get(CD_VFX)) if isinstance(mine, dict) else False
+
+
+def cd_media_id(custom: str) -> str:
+    """Media ID of the source clip this marker was synced against, if known."""
+    mine = cd_decode(custom).get(CD_NS)
+    return (mine.get(CD_MID) or "") if isinstance(mine, dict) else ""
+
+
+def cd_set_vfx(custom: str, vfx: bool, media_id: str = "") -> str:
+    """Set or clear the VFX flag, preserving everything else the string
+    was already carrying."""
+    data = cd_decode(custom)
+    mine = data.get(CD_NS) if isinstance(data.get(CD_NS), dict) else {}
+    if vfx:
+        mine[CD_VFX] = True
+        if media_id:
+            mine[CD_MID] = media_id
+        data[CD_NS] = mine
+    else:
+        mine.pop(CD_VFX, None)
+        mine.pop(CD_MID, None)
+        if mine:
+            data[CD_NS] = mine
+        else:
+            data.pop(CD_NS, None)
+    return cd_encode(data)
+
+
+# ---------------------------------------------------------------------------
 # Marker Renamer — transformation engine (ported from Batch Renamer Pro logic)
 # ---------------------------------------------------------------------------
 
@@ -549,7 +625,9 @@ def _renamer_transform(text, *, find="", replace="", add="", add_pos="After",
                         replace_all=False, trim=False, trim_begin=0, trim_end=0,
                         counter=0, counter_enabled=False, counter_digits=2,
                         counter_pos="After", counter_step=1, upper=False, lower=False,
-                        title_case=False, remove_digits=False):
+                        title_case=False, remove_digits=False,
+                        version_enabled=False, version_tag="_v",
+                        version_number=1, version_digits=1):
     n = text
     if trim and (trim_begin > 0 or trim_end > 0):
         end_idx = len(n) - trim_end if trim_end > 0 else len(n)
@@ -577,6 +655,12 @@ def _renamer_transform(text, *, find="", replace="", add="", add_pos="After",
             n = n + cs
             if add_pos == "After counter" and add:
                 n = n + add
+    # Version tag is always last — after the counter and after anything the
+    # "After counter" option appended. A version that isn't at the end of the
+    # name isn't a version.
+    if version_enabled:
+        num = str(max(0, int(version_number))).zfill(max(1, int(version_digits)))
+        n = n + version_tag + num
     return n
 
 
@@ -780,9 +864,33 @@ class MarkerRenamerDialog(tk.Toplevel):
         # Step row — indented under Counter
         _lbl(tc, "Step:",   row=2, col=1)
         _spinbox(tc, self._ctr_step_var, 1, 9999).grid(row=2, column=2, padx=(0, 4))
-        tk.Label(tc, text="e.g. 10 → 010, 020, 030  for VFX sequencing", fg=TEXT, bg=DLG,
+        tk.Label(tc, text="Start 10, Step 10 → 010, 020, 030  for VFX sequencing", fg=TEXT, bg=DLG,
                  font=("Avenir Next", 11, "italic")).grid(
                      row=2, column=3, columnspan=4, sticky="w", padx=(4, 0))
+
+        # Version row — appended last, after the counter
+        self._ver_var        = tk.BooleanVar(value=False)
+        self._ver_tag_var    = tk.StringVar(value="_v")
+        self._ver_num_var    = tk.IntVar(value=1)
+        self._ver_digits_var = tk.IntVar(value=1)
+
+        _chk(tc, "Version", self._ver_var, row=3)
+        _lbl(tc, "Tag:", row=3, col=1)
+        tk.Entry(tc, textvariable=self._ver_tag_var, width=5,
+                 bg=FIELD, fg=TEXT, insertbackground=TEXT, relief="flat",
+                 font=F_MAIN, highlightthickness=1,
+                 highlightbackground=BTN_HOV).grid(row=3, column=2,
+                                                   padx=(0, 4), sticky="w")
+        self._ver_tag_var.trace_add("write", lambda *_: self._schedule_preview())
+        _lbl(tc, "No:", row=3, col=3)
+        _spinbox(tc, self._ver_num_var, 0, 999).grid(row=3, column=4, padx=(0, 4))
+        tk.Label(tc, text="Dig:", fg=DIM, bg=DLG,
+                 font=F_SMALL, anchor="e", width=4).grid(row=3, column=5,
+                                                         sticky="e", padx=(6, 2))
+        _spinbox(tc, self._ver_digits_var, 1, 3).grid(row=3, column=6, sticky="w")
+        tk.Label(tc, text="always last, after the counter  →  _v1, _v01, -v003",
+                 fg=TEXT, bg=DLG, font=("Avenir Next", 11, "italic")).grid(
+                     row=4, column=1, columnspan=6, sticky="w", padx=(4, 0))
 
         tk.Frame(ops, bg=BTN_HOV, height=1).pack(fill="x", padx=8, pady=2)
 
@@ -881,6 +989,10 @@ class MarkerRenamerDialog(tk.Toplevel):
             counter_digits=self._ctr_digits_var.get(),
             counter_pos=self._ctr_pos_var.get(),
             counter_step=self._ctr_step_var.get(),
+            version_enabled=self._ver_var.get(),
+            version_tag=self._ver_tag_var.get(),
+            version_number=self._ver_num_var.get(),
+            version_digits=self._ver_digits_var.get(),
             upper=self._upper_var.get(),
             lower=self._lower_var.get(),
             title_case=self._title_var.get(),
@@ -912,9 +1024,11 @@ class MarkerRenamerDialog(tk.Toplevel):
 
         targets = self._get_targets()
         field   = self._field_var.get()
-        # First counter value = start × step (e.g. start=1, step=10 → 10, 20, 30).
-        # This is intentional — do not change to just start.
-        counter = self._ctr_start_var.get() * self._ctr_step_var.get()
+        # Start is the first number, Step is the increment
+        # (start=10, step=10 → 010, 020, 030).
+        # 1.6: was start × step, which made "Start: 1" produce 010. A field
+        # labelled Start has to be the number you start at.
+        counter = self._ctr_start_var.get()
 
         for rec in targets:
             p = self._get_params(counter)
@@ -961,7 +1075,8 @@ class MarkerRenamerDialog(tk.Toplevel):
                 continue
             undo_batch.append((rec, rec["name"], rec["note"]))
             ok, err = self._app._write_marker(rec, rec["color"], new_name,
-                                               new_note, rec["duration"], "")
+                                               new_note, rec["duration"],
+                                               rec.get("custom", ""))
             if ok:
                 rec["name"] = new_name
                 rec["note"] = new_note
@@ -990,7 +1105,8 @@ class MarkerRenamerDialog(tk.Toplevel):
                 continue
             undo_batch.append((rec, rec["name"], rec["note"]))
             ok, _ = self._app._write_marker(rec, rec["color"], new_name,
-                                             rec["note"], rec["duration"], "")
+                                             rec["note"], rec["duration"],
+                                             rec.get("custom", ""))
             if ok:
                 rec["name"] = new_name
         if undo_batch:
@@ -1010,9 +1126,11 @@ class MarkerRenamerDialog(tk.Toplevel):
             return
 
         field   = self._field_var.get()
-        # First counter value = start × step (e.g. start=1, step=10 → 10, 20, 30).
-        # This is intentional — do not change to just start.
-        counter = self._ctr_start_var.get() * self._ctr_step_var.get()
+        # Start is the first number, Step is the increment
+        # (start=10, step=10 → 010, 020, 030).
+        # 1.6: was start × step, which made "Start: 1" produce 010. A field
+        # labelled Start has to be the number you start at.
+        counter = self._ctr_start_var.get()
         undo_batch = []
         errors     = []
 
@@ -1028,7 +1146,8 @@ class MarkerRenamerDialog(tk.Toplevel):
 
             undo_batch.append((rec, rec["name"], rec["note"]))
             ok, err = self._app._write_marker(rec, rec["color"], new_name,
-                                               new_note, rec["duration"], "")
+                                               new_note, rec["duration"],
+                                               rec.get("custom", ""))
             if ok:
                 rec["name"] = new_name
                 rec["note"] = new_note
@@ -1078,7 +1197,8 @@ class MarkerRenamerDialog(tk.Toplevel):
         redo_batch = [(rec, rec["name"], rec["note"]) for rec, _, _ in batch]
         for rec, old_name, old_note in reversed(batch):
             ok, _ = self._app._write_marker(rec, rec["color"], old_name,
-                                             old_note, rec["duration"], "")
+                                             old_note, rec["duration"],
+                                             rec.get("custom", ""))
             if ok:
                 rec["name"] = old_name
                 rec["note"] = old_note
@@ -1096,7 +1216,8 @@ class MarkerRenamerDialog(tk.Toplevel):
         undo_batch = [(rec, rec["name"], rec["note"]) for rec, _, _ in redo_batch]
         for rec, redo_name, redo_note in redo_batch:
             ok, _ = self._app._write_marker(rec, rec["color"], redo_name,
-                                             redo_note, rec["duration"], "")
+                                             redo_note, rec["duration"],
+                                             rec.get("custom", ""))
             if ok:
                 rec["name"] = redo_name
                 rec["note"] = redo_note
@@ -1120,6 +1241,10 @@ class MarkerRenamerDialog(tk.Toplevel):
         self._ctr_digits_var.set(2)
         self._ctr_start_var.set(1)
         self._ctr_step_var.set(1)
+        self._ver_var.set(False)
+        self._ver_tag_var.set("_v")
+        self._ver_num_var.set(1)
+        self._ver_digits_var.set(1)
         self._ctr_pos_var.set("After")
         self._upper_var.set(False)
         self._lower_var.set(False)
@@ -2093,6 +2218,120 @@ class PromoteOptionsDialog(tk.Toplevel):
         except (ValueError, tk.TclError):
             offset = 0
         self.result = (offset, self._color_var.get())
+        self.destroy()
+
+
+# ---------------------------------------------------------------------------
+# Pull-from-metadata options  (← Metadata)
+# ---------------------------------------------------------------------------
+
+class PullMetadataDialog(tk.Toplevel):
+    """Options for ← Metadata.
+
+    Filling markers that already exist and creating markers that don't are two
+    different jobs; this lets you pick either or both.
+
+    result : dict, or None on cancel.
+    """
+
+    def __init__(self, parent, track_label="All Tracks",
+                 f_shot="VFX Shot #", f_notes="VFX Notes"):
+        super().__init__(parent)
+        self.withdraw()
+        self.title("Metadata → Markers")
+        self.resizable(False, False)
+        self.configure(bg=BG)
+        self.result = None
+
+        tk.Label(self, text="Metadata → Markers", fg=TEXT, bg=BG,
+                 font=F_BOLD).pack(padx=24, pady=(16, 4))
+        tk.Label(self, text=f"Copy {f_shot} and {f_notes} from each clip's\n"
+                            f"metadata onto its markers.",
+                 fg=DIM, bg=BG, font=F_SMALL, justify="left").pack(padx=24, pady=(0, 12))
+
+        body = tk.Frame(self, bg=BG)
+        body.pack(padx=24, fill="x")
+
+        def _chk(parent_, text, var, **grid):
+            c = tk.Checkbutton(parent_, text=text, variable=var,
+                               fg=TEXT, bg=BG, selectcolor=ENTRY_BG,
+                               activebackground=BG, activeforeground=TEXT,
+                               highlightthickness=0, bd=0, font=F_SMALL)
+            c.grid(sticky="w", **grid)
+            return c
+
+        tk.Label(body, text="Clips that already have a marker",
+                 fg=ACCENT, bg=BG, font=F_SMALL).grid(row=0, column=0, sticky="w", pady=(0, 2))
+        self._update_var = tk.BooleanVar(value=True)
+        _chk(body, "Update that marker", self._update_var, row=1, column=0, padx=(12, 0))
+
+        tk.Label(body, text="Clips with no marker",
+                 fg=ACCENT, bg=BG, font=F_SMALL).grid(row=2, column=0, sticky="w", pady=(12, 2))
+        self._create_var = tk.BooleanVar(value=True)
+        _chk(body, "Create a new marker", self._create_var, row=3, column=0, padx=(12, 0))
+
+        newopts = tk.Frame(body, bg=BG)
+        newopts.grid(row=4, column=0, sticky="w", padx=(30, 0), pady=(2, 0))
+        tk.Label(newopts, text="at", fg=DIM, bg=BG, font=F_SMALL).grid(row=0, column=0, sticky="w")
+        self._place_var = tk.StringVar(value="Middle of clip")
+        ttk.Combobox(newopts, textvariable=self._place_var,
+                     values=["Middle of clip", "20 frames from head"],
+                     state="readonly", width=19).grid(row=0, column=1, padx=(6, 0), pady=2)
+        tk.Label(newopts, text="lasting", fg=DIM, bg=BG, font=F_SMALL).grid(row=1, column=0, sticky="w")
+        self._span_var = tk.StringVar(value="One frame")
+        ttk.Combobox(newopts, textvariable=self._span_var,
+                     values=["One frame", "The whole clip"],
+                     state="readonly", width=19).grid(row=1, column=1, padx=(6, 0), pady=2)
+        tk.Label(newopts, text="colour", fg=DIM, bg=BG, font=F_SMALL).grid(row=2, column=0, sticky="w")
+        self._color_var = tk.StringVar(value="Blue")
+        ttk.Combobox(newopts, textvariable=self._color_var, values=MARKER_COLORS,
+                     state="readonly", width=19).grid(row=2, column=1, padx=(6, 0), pady=2)
+
+        tk.Label(body, text="Copy which fields",
+                 fg=ACCENT, bg=BG, font=F_SMALL).grid(row=5, column=0, sticky="w", pady=(12, 2))
+        self._name_var = tk.BooleanVar(value=True)
+        self._note_var = tk.BooleanVar(value=True)
+        _chk(body, f"{f_shot} → marker name", self._name_var, row=6, column=0, padx=(12, 0))
+        _chk(body, f"{f_notes} → marker note", self._note_var, row=7, column=0, padx=(12, 0))
+
+        self._track_var = tk.BooleanVar(value=track_label not in ("All Tracks", "Ruler"))
+        if track_label not in ("All Tracks", "Ruler"):
+            _chk(body, f"Only {track_label}  (otherwise every video track)",
+                 self._track_var, row=8, column=0, pady=(12, 0))
+
+        bf = tk.Frame(self, bg=BG)
+        bf.pack(pady=(16, 16))
+        TBtn(bf, text="OK",     command=self._ok,     bg=ACCENT, fg=BG).pack(side="left", padx=8)
+        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT, fg=BG).pack(side="left", padx=8)
+
+        self.bind("<Return>",   lambda _: self._ok())
+        self.bind("<KP_Enter>", lambda _: self._ok())
+        self.bind("<Escape>",   lambda _: self.destroy())
+        center_on_parent(self, parent)
+        self.deiconify()
+        self.lift()
+        self.attributes("-topmost", True)
+
+    def _ok(self):
+        if not (self._update_var.get() or self._create_var.get()):
+            messagebox.showwarning("Metadata → Markers",
+                                   "Nothing to do — tick update, create, or both.",
+                                   parent=self)
+            return
+        if not (self._name_var.get() or self._note_var.get()):
+            messagebox.showwarning("Metadata → Markers",
+                                   "Pick at least one field to copy.", parent=self)
+            return
+        self.result = {
+            "update":     self._update_var.get(),
+            "create":     self._create_var.get(),
+            "copy_name":  self._name_var.get(),
+            "copy_note":  self._note_var.get(),
+            "placement":  "middle" if self._place_var.get().startswith("Middle") else "head",
+            "span_clip":  self._span_var.get().startswith("The whole"),
+            "color":      self._color_var.get(),
+            "track_only": self._track_var.get(),
+        }
         self.destroy()
 
 
@@ -4083,7 +4322,7 @@ class ExportFrameOptionsDialog(tk.Toplevel):
 # ---------------------------------------------------------------------------
 
 APP_TITLE   = "Marker Madness"
-APP_VERSION = "1.5"
+APP_VERSION = "1.6"
 
 class MarkerMadness:
     def __init__(self, root: tk.Tk):
@@ -4460,6 +4699,13 @@ class MarkerMadness:
         self._track_cb.pack(side="left")
         self._filter_track.trace_add("write", lambda *_: self._populate_table())
 
+        tk.Label(tb2, text="VFX:", fg=TEXT, bg=BG, font=F_SMALL).pack(side="left", padx=(16, 3))
+        self._filter_vfx = tk.StringVar(value="All")
+        ttk.Combobox(tb2, textvariable=self._filter_vfx,
+                     values=["All", "VFX only", "Non-VFX"],
+                     state="readonly", width=9).pack(side="left")
+        self._filter_vfx.trace_add("write", lambda *_: self._populate_table())
+
         # Search field
         tk.Label(tb2, text="🔍 Search:", fg=TEXT, bg=BG, font=F_SMALL).pack(side="left", padx=(16, 3))
         self._search_entry = tk.Entry(tb2, textvariable=self._search_var, width=20,
@@ -4503,9 +4749,20 @@ class MarkerMadness:
         TBtn(tb2, text="↺ Reset Column Layout", command=self._reset_layout,
              bg=BTN, fg=DIM).pack(side="right", padx=3)
 
-        # Toolbar row 3 — reports / exchange
+        # Toolbar row 3 — VFX designation / reports / exchange
         tb3 = tk.Frame(self.root, bg=BG, pady=2)
         tb3.pack(fill="x", padx=12)
+
+        tk.Label(tb3, text="VFX:", fg=TEXT, bg=BG, font=F_SMALL).pack(side="left", padx=(0, 4))
+        TBtn(tb3, text="◈ Mark VFX", command=lambda: self._batch_set_vfx(True),
+             bg=BTN, fg=DIM, padx=8, pady=2).pack(side="left")
+        TBtn(tb3, text="◇ Clear VFX", command=lambda: self._batch_set_vfx(False),
+             bg=BTN, fg=DIM, padx=8, pady=2).pack(side="left", padx=(4, 0))
+        TBtn(tb3, text="→ Metadata", command=self._push_vfx_to_metadata,
+             bg=BTN, fg=DIM, padx=8, pady=2).pack(side="left", padx=(12, 0))
+        TBtn(tb3, text="← Metadata", command=self._pull_vfx_from_metadata,
+             bg=BTN, fg=DIM, padx=8, pady=2).pack(side="left", padx=(4, 0))
+
         TBtn(tb3, text="📊 Shot Change Report", command=self._open_shot_change_report,
              bg=BTN, fg=DIM, padx=8, pady=2).pack(side="right")
         TBtn(tb3, text="🔄 Marker Exchange", command=self._open_marker_exchange,
@@ -4782,9 +5039,12 @@ class MarkerMadness:
         # Column order
         saved_order = p.get("col_order", [])
         valid = [c for c in saved_order if c in COL_IDS]
-        for c in COL_IDS:
+        # Columns added by a new version aren't in the saved order. Slot them
+        # in at their declared position rather than appending — a new column
+        # dumped off the right edge is a column nobody finds.
+        for i, c in enumerate(COL_IDS):
             if c not in valid:
-                valid.append(c)
+                valid.insert(min(i, len(valid)), c)
         if valid:
             self._tree.configure(displaycolumns=valid)
 
@@ -4862,6 +5122,10 @@ class MarkerMadness:
                 "note":         r["note"],
                 "duration":     r["duration"],
                 "frame_offset": r["timeline_frame"] - min_frame,
+                # Carry the VFX flag across a copy/paste, but drop the stamped
+                # media id — the paste lands on a different clip, so the old
+                # provenance would be a lie.
+                "custom":       cd_set_vfx("", True) if r.get("vfx") else "",
             }
             for r in recs
         ]
@@ -4932,7 +5196,8 @@ class MarkerMadness:
             if paste_to_ruler:
                 ok, _err = self._add_marker_on_timeline(
                     timeline, tl_frame,
-                    entry["color"], entry["name"], entry["note"], entry["duration"]
+                    entry["color"], entry["name"], entry["note"], entry["duration"],
+                    entry.get("custom", "")
                 )
                 obj      = timeline
                 frame_id = tl_frame
@@ -4944,7 +5209,8 @@ class MarkerMadness:
                     # Fallback: no clip at this frame on the chosen track → ruler
                     ok, _err = self._add_marker_on_timeline(
                         timeline, tl_frame,
-                        entry["color"], entry["name"], entry["note"], entry["duration"]
+                        entry["color"], entry["name"], entry["note"], entry["duration"],
+                        entry.get("custom", "")
                     )
                     obj      = timeline
                     frame_id = tl_frame
@@ -4956,7 +5222,8 @@ class MarkerMadness:
                     frame_id = (tl_frame + self._start_frame) - clip_item.GetStart() + left_offset
                     ok, _err = self._resolve_add_marker(
                         clip_item, frame_id,
-                        entry["color"], entry["name"], entry["note"], entry["duration"], ""
+                        entry["color"], entry["name"], entry["note"], entry["duration"],
+                        entry.get("custom", "")
                     )
                     obj      = clip_item
             if ok:
@@ -4993,6 +5260,8 @@ class MarkerMadness:
         self._filter_type.set("All Types")
         if hasattr(self, "_filter_track"):
             self._filter_track.set("All Tracks")
+        if hasattr(self, "_filter_vfx"):
+            self._filter_vfx.set("All")
 
     def _start_timeline_poll(self):
         """Poll Resolve every 4 seconds and auto-refresh if the timeline has changed."""
@@ -5221,6 +5490,7 @@ class MarkerMadness:
                     track_index=0,
                     timeline_item=None,
                     uid=f"s_{ci}_{mf}",
+                    custom=m.get("customData", "") or "",
                 )
                 rec["mpi"]       = mpi
                 rec["src_fps"]   = fps
@@ -5273,6 +5543,7 @@ class MarkerMadness:
                 track_type="",
                 track_index=0,
                 timeline_item=None,
+                custom=m.get("customData", "") or "",
             )
             markers.append(rec)
 
@@ -5338,6 +5609,7 @@ class MarkerMadness:
                                 track_index=ti,
                                 timeline_item=item,
                                 uid=uid,
+                                custom=m.get("customData", "") or "",
                             )
                             markers.append(rec)
         except Exception as clip_exc:
@@ -5352,7 +5624,7 @@ class MarkerMadness:
     def _make_record(self, *, mtype, timeline_frame, marker_frame,
                      color, name, note, duration,
                      clip_name, track_type, track_index, timeline_item,
-                     uid=None) -> dict:
+                     uid=None, custom="") -> dict:
         if uid is None:
             uid = f"t_{timeline_frame}"
 
@@ -5381,6 +5653,9 @@ class MarkerMadness:
             "clip_in_frame":   clip_in_frame,
             "clip_out_frame":  clip_out_frame,
             "clip_dur_frames": clip_dur_frames,
+            # Raw customData string, carried so edits never destroy it
+            "custom":          custom,
+            "vfx":             cd_is_vfx(custom),
         }
 
     # ── Search ────────────────────────────────────────────────────────────
@@ -5456,6 +5731,7 @@ class MarkerMadness:
         color_f  = self._filter_color.get()
         type_f   = self._filter_type.get()
         track_f  = self._filter_track.get() if hasattr(self, "_filter_track") else "All Tracks"
+        vfx_f    = self._filter_vfx.get() if hasattr(self, "_filter_vfx") else "All"
         search_f = self._search_var.get().strip().lower()
         shown    = 0
 
@@ -5473,6 +5749,10 @@ class MarkerMadness:
             if type_f == "Clip" and rec["type"] != "Clip":
                 continue
             if not self._track_filter_ok(rec, track_f):
+                continue
+            if vfx_f == "VFX only" and not rec.get("vfx"):
+                continue
+            if vfx_f == "Non-VFX" and rec.get("vfx"):
                 continue
             if search_f:
                 haystack = " ".join([
@@ -5506,7 +5786,9 @@ class MarkerMadness:
                               text="",
                               image=self._color_imgs.get(rec["color"], self._color_imgs[""]),
                               values=(label, frame_disp, tc,
-                                      rec["color"], rec["name"], rec["note"],
+                                      rec["color"],
+                                      "✓" if rec.get("vfx") else "",
+                                      rec["name"], rec["note"],
                                       rec["clip_name"], rec["duration"],
                                       clip_in_tc, clip_out_tc, clip_dur_f, clip_dur_t),
                               tags=(tag_type, tag_color))
@@ -5681,12 +5963,42 @@ class MarkerMadness:
 
     # ── Inline editing ────────────────────────────────────────────────────
 
+    def _display_cols(self) -> list:
+        """The column order actually on screen, left to right.
+        displaycolumns is ('#all',) until something reorders it."""
+        cols = list(self._tree["displaycolumns"])
+        if not cols or cols == ["#all"]:
+            return list(COL_IDS)
+        return cols
+
+    def _col_at_event(self, event) -> str:
+        """Logical column id under the pointer.
+
+        identify_column() reports a DISPLAY position ('#5'), which stops
+        agreeing with COL_IDS the moment a column is reordered or a new one
+        is appended. Always map through displaycolumns — never NUM_COL.
+        """
+        try:
+            idx = int(self._tree.identify_column(event.x).lstrip("#")) - 1
+        except (ValueError, AttributeError):
+            return ""
+        cols = self._display_cols()
+        return cols[idx] if 0 <= idx < len(cols) else ""
+
+    def _col_spec(self, col_id: str) -> str:
+        """Display spec ('#N') for a logical column id — for bbox()."""
+        cols = self._display_cols()
+        try:
+            return f"#{cols.index(col_id) + 1}"
+        except ValueError:
+            return COL_NUM.get(col_id, "#1")
+
     def _on_click(self, event):
         self._close_inline()
         if not self._click_edit_var.get():
             return
         region = self._tree.identify_region(event.x, event.y)
-        col_id = NUM_COL.get(self._tree.identify_column(event.x), "")
+        col_id = self._col_at_event(event)
         item   = self._tree.identify_row(event.y)
         if region != "cell" or col_id not in ("name", "note") or not item:
             return
@@ -5708,7 +6020,7 @@ class MarkerMadness:
            - Color column: color picker list
            - Name / Note columns: 'Edit' option that opens inline editor
         """
-        col_id = NUM_COL.get(self._tree.identify_column(event.x), "")
+        col_id = self._col_at_event(event)
         item   = self._tree.identify_row(event.y)
         if not item:
             return
@@ -5772,7 +6084,8 @@ class MarkerMadness:
             if not rec or new_color == rec["color"]:
                 continue
             ok, err = self._write_marker(rec, new_color, rec["name"],
-                                         rec["note"], rec["duration"], "")
+                                         rec["note"], rec["duration"],
+                                         rec.get("custom", ""))
             if ok:
                 rec["color"] = new_color
                 col_idx = COL_IDS.index("color")
@@ -5792,11 +6105,491 @@ class MarkerMadness:
             self._mb(messagebox.showerror, "Error", f"Could not update some markers:\n\n{detail}")
             self._refresh()
 
+    # ── VFX designation ───────────────────────────────────────────────────
+
+    def _marker_owner(self, rec):
+        """Return ((object, frame_id), "") for whatever owns this marker.
+        Clip markers are re-found on their OWN track so we never write to a
+        same-frame clip sitting on a lower one."""
+        if rec["type"] == "Source":
+            mpi = rec.get("mpi")
+            if mpi is None:
+                return None, "Source clip reference lost — Refresh and retry."
+            return (mpi, rec["marker_frame"]), ""
+
+        timeline, err = self._fresh_timeline()
+        if not timeline:
+            return None, err
+
+        if rec["type"] == "Timeline":
+            return (timeline, rec["timeline_frame"]), ""
+
+        item = self._find_clip_at_frame(timeline, rec["timeline_frame"],
+                                        rec.get("track_type") or None,
+                                        rec.get("track_index") or None,
+                                        rec.get("clip_name") or None)
+        if item is None and rec.get("clip_name"):
+            # Edit may have moved since load — search every track by name.
+            item = self._find_clip_at_frame(timeline, rec["timeline_frame"],
+                                            clip_name=rec["clip_name"])
+        if item is None:
+            cname = rec.get("clip_name")
+            return None, (f"Couldn't find this marker's clip"
+                          f"{' (' + cname + ')' if cname else ''}. "
+                          "Try Refresh and retry.")
+        return (item, rec["marker_frame"]), ""
+
+    def _set_vfx_flag(self, rec, vfx: bool, media_id: str = ""):
+        """Set or clear this marker's VFX designation.
+
+        Writes customData in place via UpdateMarkerCustomData so the marker
+        itself is never deleted and recreated — name, note, colour and
+        duration are untouched. Falls back to a full rewrite on builds where
+        that call is missing or refuses the payload.
+        Returns (ok, error_message).
+        """
+        new_custom = cd_set_vfx(rec.get("custom", ""), vfx, media_id)
+        if new_custom == rec.get("custom", ""):
+            return True, ""                      # already in the wanted state
+
+        owner, err = self._marker_owner(rec)
+        if owner is None:
+            return False, err
+        obj, frame_id = owner
+
+        ok = False
+        fn = getattr(obj, "UpdateMarkerCustomData", None)
+        if fn is not None:
+            try:
+                ok = bool(fn(frame_id, new_custom))
+            except Exception:
+                ok = False
+            if not ok:
+                # Some builds return False having written it anyway — verify.
+                try:
+                    getter = getattr(obj, "GetMarkerCustomData", None)
+                    if getter is not None and getter(frame_id) == new_custom:
+                        ok = True
+                except Exception:
+                    pass
+
+        if not ok:
+            # Last resort: delete and recreate carrying the new payload.
+            ok2, err2 = self._write_marker(rec, rec["color"], rec["name"],
+                                           rec["note"], rec["duration"],
+                                           new_custom)
+            if not ok2:
+                return False, err2
+
+        rec["custom"] = new_custom
+        rec["vfx"]    = cd_is_vfx(new_custom)
+        return True, ""
+
+    def _batch_set_vfx(self, vfx: bool):
+        """Designate the selected markers as VFX shots, or clear that flag.
+        With nothing selected, acts on everything the filters leave visible."""
+        visible, selected = self._get_filtered_markers()
+        targets = selected or visible
+        if not targets:
+            self._mb(messagebox.showinfo, "VFX",
+                     "No markers to update — select some rows, or clear the filters.")
+            return
+
+        verb  = "Mark" if vfx else "Clear"
+        todo  = [r for r in targets if bool(r.get("vfx")) != vfx]
+        if not todo:
+            state = "flagged as VFX" if vfx else "not flagged"
+            self._mb(messagebox.showinfo, "VFX",
+                     f"All {len(targets)} marker{'s' if len(targets) != 1 else ''} "
+                     f"already {state} — nothing to do.")
+            return
+
+        if not selected:
+            if not self._mb(messagebox.askyesno, f"{verb} VFX",
+                            f"{verb} VFX on all {len(todo)} visible "
+                            f"marker{'s' if len(todo) != 1 else ''}?\n\n"
+                            "Nothing is selected, so this applies to every marker "
+                            "the current filters show."):
+                return
+
+        errors = []
+        for rec in todo:
+            ok, err = self._set_vfx_flag(rec, vfx)
+            if not ok:
+                errors.append(f"Frame {rec['timeline_frame']}: {err}")
+
+        self._populate_table()
+        done = len(todo) - len(errors)
+        if errors:
+            detail = "\n".join(errors[:5])
+            if len(errors) > 5:
+                detail += f"\n… and {len(errors) - 5} more"
+            self._mb(messagebox.showerror, "VFX",
+                     f"{verb}ed VFX on {done} of {len(todo)} marker(s).\n\n{detail}")
+        else:
+            self._fps_var.set(
+                f"{verb}ed VFX on {done} marker{'s' if done != 1 else ''}.")
+
+    # ── VFX metadata sync ─────────────────────────────────────────────────
+    #
+    # Metadata lives on the MediaPoolItem, never on the TimelineItem, so one
+    # source clip used several times in a timeline shares ONE metadata record.
+    # Markers are per-instance. That mismatch is the whole reason the push
+    # below groups by source clip and reports collisions instead of letting
+    # the last write silently win.
+
+    def _vfx_fields(self):
+        """Metadata field names to sync against. Overridable via prefs.json
+        so a show with a different metadata panel needs no code change."""
+        p = self._prefs.get("vfx_fields", {}) or {}
+        return (p.get("shot",   "VFX Shot #"),
+                p.get("notes",  "VFX Notes"),
+                p.get("rollup", "VFX Markers"))
+
+    @staticmethod
+    def _md_set(mpi, key, value):
+        """SetMetadata, then verify by reading it back. Returns (ok, error).
+
+        The read-back is what catches a wrong field-name string: Resolve
+        accepts the call and quietly stores nothing.
+        """
+        val = str(value)
+        try:
+            res = mpi.SetMetadata(key, val)
+        except Exception as exc:
+            return False, f"SetMetadata('{key}') raised: {exc}"
+
+        # Verify. A failed read is NOT success — an unrecognised key can raise
+        # here, and treating that as "written" is how a push reports 6 of 6
+        # while the Metadata panel stays empty.
+        try:
+            back = mpi.GetMetadata(key)
+            read_err = ""
+        except Exception as exc:
+            back, read_err = None, str(exc)
+
+        if back == val:
+            return True, ""
+        if res is False:
+            return False, (f"Resolve rejected '{key}' — SetMetadata returned False. "
+                           f"Either that isn't Resolve's key for the field, or this "
+                           f"clip's metadata can't be written.")
+        if read_err:
+            return False, (f"wrote '{key}' (returned {res!r}) but reading it back "
+                           f"failed: {read_err}")
+        return False, (f"wrote {val!r} to '{key}' (returned {res!r}) but read back "
+                       f"{back!r} — '{key}' is probably not Resolve's key for this field")
+
+    def _mpi_for_record(self, rec, timeline=None):
+        """Resolve the MediaPoolItem behind a marker. Returns (mpi, reason)."""
+        try:
+            if rec["type"] == "Source":
+                mpi = rec.get("mpi")
+                return (mpi, "") if mpi else (None, "source clip reference lost")
+
+            if timeline is None:
+                timeline, err = self._fresh_timeline()
+                if not timeline:
+                    return None, err
+
+            item = rec.get("timeline_item")
+            if rec["type"] == "Timeline" or item is None:
+                # Ruler markers aren't attached to a clip — find what's under it.
+                item = self._find_clip_at_frame(
+                    timeline, rec["timeline_frame"],
+                    rec.get("track_type") or None,
+                    rec.get("track_index") or None,
+                    rec.get("clip_name") or None)
+            if item is None:
+                return None, "no clip under this marker"
+            mpi = item.GetMediaPoolItem()
+            if mpi is None:
+                return None, "clip has no source (title, generator or transition)"
+            return mpi, ""
+        except Exception as exc:
+            return None, str(exc)
+
+    @staticmethod
+    def _media_id(mpi):
+        for attr in ("GetMediaId", "GetUniqueId"):
+            try:
+                v = getattr(mpi, attr, lambda: None)()
+                if v:
+                    return str(v)
+            except Exception:
+                continue
+        try:
+            return mpi.GetName() or "?"
+        except Exception:
+            return "?"
+
+    def _push_vfx_to_metadata(self):
+        """Write VFX-flagged marker names and notes into each source clip's
+        metadata, where Data Burn-In can read them."""
+        f_shot, f_notes, f_rollup = self._vfx_fields()
+        visible, selected = self._get_filtered_markers()
+        todo = [r for r in (selected or visible) if r.get("vfx")]
+        if not todo:
+            self._mb(messagebox.showinfo, "Push to Metadata",
+                     "No VFX-flagged markers in scope.\n\n"
+                     "Select markers and hit “◈ Mark VFX” first, or set the "
+                     "VFX filter to “VFX only”.")
+            return
+
+        timeline = None
+        if getattr(self, "_mode", "timeline") != "pool":
+            timeline, err = self._fresh_timeline()
+            if not timeline:
+                self._mb(messagebox.showerror, "Push to Metadata", err)
+                return
+
+        # Group by source clip — several markers can share one MediaPoolItem
+        groups, unresolved = {}, []
+        for rec in todo:
+            mpi, why = self._mpi_for_record(rec, timeline)
+            if mpi is None:
+                unresolved.append(f"{rec.get('name') or '(unnamed)'} — {why}")
+                continue
+            mid = self._media_id(mpi)
+            groups.setdefault(mid, {"mpi": mpi, "recs": []})["recs"].append(rec)
+
+        if not groups:
+            self._mb(messagebox.showerror, "Push to Metadata",
+                     "Couldn't resolve a source clip for any VFX marker:\n\n"
+                     + "\n".join(unresolved[:10]))
+            return
+
+        if not self._mb(messagebox.askyesno, "Push to Metadata",
+                        f"Write {len(todo)} VFX marker(s) into the metadata of "
+                        f"{len(groups)} source clip(s)?\n\n"
+                        f"Name → {f_shot}\n"
+                        f"Note → {f_notes}\n"
+                        f"All names on a clip → {f_rollup}\n\n"
+                        "This overwrites those fields on the source clips."):
+            return
+
+        written, collisions, errors = 0, [], []
+        for mid, g in groups.items():
+            mpi, recs = g["mpi"], g["recs"]
+            try:
+                clip = mpi.GetName() or mid
+            except Exception:
+                clip = mid
+            names  = [r["name"].strip() for r in recs if r["name"].strip()]
+            uniq   = sorted(set(names))
+            ok_all = True
+
+            if len(uniq) <= 1:
+                # One shot on this clip — the single-value fields are safe, and
+                # the roll-up stays empty so a value there always means
+                # "this plate is used more than once".
+                note   = next((r["note"] for r in recs if r["note"].strip()), "")
+                writes = [(f_shot, uniq[0] if uniq else ""), (f_notes, note)]
+            else:
+                # Several shots share this source clip. Neither single-value
+                # field can describe them all, so label every entry by its shot
+                # number rather than dropping the notes or running them together.
+                collisions.append((clip, uniq))
+                labelled = []
+                for n in uniq:
+                    note = next((r["note"].strip() for r in recs
+                                 if r["name"].strip() == n and r["note"].strip()), "")
+                    if note:
+                        labelled.append(f"{n}: {note}")
+                writes = [(f_rollup, " / ".join(uniq)),
+                          (f_notes,  "\n".join(labelled))]
+
+            for key, val in writes:
+                if not val:
+                    continue
+                ok, err = self._md_set(mpi, key, val)
+                if not ok:
+                    ok_all = False
+                    errors.append(f"{clip} · {err}")
+
+            if ok_all:
+                written += 1
+                for r in recs:
+                    self._set_vfx_flag(r, True, mid)   # stamp provenance
+
+        self._populate_table()
+        self._report_push(written, len(groups), collisions, errors,
+                          unresolved, f_shot, f_rollup)
+
+    def _report_push(self, written, total, collisions, errors, unresolved,
+                     f_shot, f_rollup):
+        lines = [f"Updated {written} of {total} source clip(s)."]
+        if collisions:
+            lines.append(
+                f"\n⚠  {len(collisions)} clip(s) are used more than once with "
+                f"different shot numbers. One clip cannot hold several, so "
+                f"'{f_shot}' was left untouched on these. Every number went to "
+                f"'{f_rollup}', and the notes were written labelled by shot. "
+                f"For burn-in on these, use Marker Name / Marker Notes — "
+                f"markers are per-instance and stay correct:")
+            for clip, uniq in collisions[:6]:
+                lines.append(f"   • {clip} — {', '.join(uniq)}")
+            if len(collisions) > 6:
+                lines.append(f"   … and {len(collisions) - 6} more")
+        if unresolved:
+            lines.append(f"\nSkipped {len(unresolved)} marker(s) with no source clip:")
+            lines += [f"   • {u}" for u in unresolved[:5]]
+        if errors:
+            lines.append(f"\n{len(errors)} write error(s):")
+            lines += [f"   • {e}" for e in errors[:5]]
+
+        body = "\n".join(lines)
+        if errors:
+            self._mb(messagebox.showerror, "Push to Metadata", body)
+        elif collisions or unresolved:
+            self._mb(messagebox.showwarning, "Push to Metadata", body)
+        else:
+            self._mb(messagebox.showinfo, "Push to Metadata", body)
+
+    def _rewrite_clip_marker(self, item, frame_id, m, *, name=None, note=None,
+                             media_id=""):
+        """Replace a clip marker in place, keeping whatever isn't being changed.
+
+        Resolve has no update-in-place API for a marker's name or note, so this
+        is a delete + recreate at the same frame. Colour, duration and any
+        foreign customData survive.
+        """
+        color  = m.get("color", "Blue")
+        dur    = m.get("duration", 1) or 1
+        old_nm = m.get("name", "")
+        old_nt = m.get("note", "")
+        old_cd = m.get("customData", "") or ""
+        new_nm = old_nm if name is None else name
+        new_nt = old_nt if note is None else note
+        custom = cd_set_vfx(old_cd, True, media_id)
+        if new_nm == old_nm and new_nt == old_nt and custom == old_cd:
+            return True, ""                      # already correct
+        self._resolve_delete_marker(item, frame_id)
+        return self._resolve_add_marker(item, frame_id, color, new_nm, new_nt,
+                                        dur, custom)
+
+    def _pull_vfx_from_metadata(self):
+        """Copy VFX metadata onto markers — filling markers that already exist,
+        creating ones that don't, or both."""
+        if getattr(self, "_mode", "timeline") == "pool":
+            self._mb(messagebox.showinfo, "Metadata \u2192 Markers",
+                     "Switch to Timeline mode \u2014 this works on timeline clips.")
+            return
+
+        f_shot, f_notes, _ = self._vfx_fields()
+        timeline, err = self._fresh_timeline()
+        if not timeline:
+            self._mb(messagebox.showerror, "Metadata \u2192 Markers", err)
+            return
+
+        track_f = self._filter_track.get() if hasattr(self, "_filter_track") else "All Tracks"
+        dlg = PullMetadataDialog(self.root, track_label=track_f,
+                                 f_shot=f_shot, f_notes=f_notes)
+        self.root.wait_window(dlg)
+        if not dlg.result:
+            return
+        o = dlg.result
+
+        tracks = list(range(1, (timeline.GetTrackCount("video") or 0) + 1))
+        if o["track_only"] and track_f.startswith("V") and track_f[1:].isdigit():
+            tracks = [int(track_f[1:])]
+
+        updated = created = skipped = ambiguous = 0
+        errors = []
+        for ti in tracks:
+            for item in (timeline.GetItemListInTrack("video", ti) or []):
+                try:
+                    if item.GetName().strip().lower() in self._TRANSITION_NAMES:
+                        continue
+                    mpi = item.GetMediaPoolItem()
+                    if mpi is None:
+                        continue
+                    shot = (mpi.GetMetadata(f_shot)  or "").strip()
+                    note = (mpi.GetMetadata(f_notes) or "").strip()
+                except Exception:
+                    continue
+                if not shot and not note:
+                    continue
+
+                try:
+                    markers = item.GetMarkers() or {}
+                except Exception:
+                    markers = {}
+
+                # Which marker gets filled? One already flagged VFX wins;
+                # otherwise a lone marker on the clip. Several unflagged
+                # markers is ambiguous \u2014 don't guess, report it.
+                target = None
+                vfx_frames = [f for f, m in markers.items()
+                              if cd_is_vfx(m.get("customData", "") or "")]
+                if vfx_frames:
+                    target = sorted(vfx_frames)[0]
+                elif len(markers) == 1:
+                    target = list(markers)[0]
+                elif len(markers) > 1:
+                    ambiguous += 1
+                    continue
+
+                mid = self._media_id(mpi)
+                if target is not None:
+                    if not o["update"]:
+                        skipped += 1
+                        continue
+                    ok, e = self._rewrite_clip_marker(
+                        item, target, markers[target],
+                        name=shot if (o["copy_name"] and shot) else None,
+                        note=note if (o["copy_note"] and note) else None,
+                        media_id=mid)
+                    if ok:
+                        updated += 1
+                    else:
+                        errors.append(f"V{ti} \u00b7 {shot or note}: {e}")
+                else:
+                    if not o["create"]:
+                        skipped += 1
+                        continue
+                    try:
+                        left = item.GetLeftOffset() or 0
+                        dur  = item.GetDuration() or 1
+                    except Exception:
+                        left, dur = 0, 1
+                    offset = left + (dur // 2 if o["placement"] == "middle"
+                                     else min(20, max(dur - 1, 0)))
+                    ok, e = self._resolve_add_marker(
+                        item, offset, o["color"],
+                        shot if o["copy_name"] else "",
+                        note if o["copy_note"] else "",
+                        dur if o["span_clip"] else 1,
+                        cd_set_vfx("", True, mid))
+                    if ok:
+                        created += 1
+                    else:
+                        errors.append(f"V{ti} \u00b7 {shot or note}: {e}")
+
+        self._refresh()
+        parts = []
+        if updated:
+            parts.append(f"Filled {updated} existing marker(s)")
+        if created:
+            parts.append(f"created {created} new")
+        if skipped:
+            parts.append(f"skipped {skipped}")
+        if ambiguous:
+            parts.append(f"left {ambiguous} clip(s) alone \u2014 several markers, "
+                         f"none flagged VFX, so there was no way to tell which to fill")
+        body = (", ".join(parts) + ".") if parts else (
+            f"No clips carried a '{f_shot}' or '{f_notes}' value.")
+        if errors:
+            body += f"\n\n{len(errors)} failed:\n" + "\n".join(f"   \u2022 {e}" for e in errors[:5])
+            self._mb(messagebox.showerror, "Metadata \u2192 Markers", body)
+        else:
+            self._mb(messagebox.showinfo, "Metadata \u2192 Markers", body)
+
     def _start_inline(self, item: str, col_id: str):
         self._click_job = None
         if not self._tree.exists(item):
             return
-        bbox = self._tree.bbox(item, COL_NUM[col_id])
+        bbox = self._tree.bbox(item, self._col_spec(col_id))
         if not bbox:
             return
         x, y, w, h = bbox
@@ -5872,7 +6665,7 @@ class MarkerMadness:
         ok, err = self._write_marker(rec,
                                      color=new_color, name=new_name,
                                      note=new_note, duration=rec["duration"],
-                                     custom="")
+                                     custom=rec.get("custom", ""))
         if ok:
             rec["color"] = new_color
             rec["name"]  = new_name
@@ -6361,7 +7154,7 @@ class MarkerMadness:
         ok = False; err = ""; used_frame = clip_offset
         for _fid in [clip_offset, left_offset, 0]:
             ok, err = self._resolve_add_marker(
-                item, _fid, r["color"], r["name"], r["note"], r["duration"], ""
+                item, _fid, r["color"], r["name"], r["note"], r["duration"], r.get("custom", "")
             )
             if ok:
                 used_frame = _fid
@@ -6673,7 +7466,8 @@ class MarkerMadness:
         if new_name == rec["name"] and new_note == rec["note"]:
             return
         ok, err = self._write_marker(rec, color=rec["color"], name=new_name,
-                                     note=new_note, duration=rec["duration"], custom="")
+                                     note=new_note, duration=rec["duration"],
+                                     custom=rec.get("custom", ""))
         if ok:
             rec["name"] = new_name
             rec["note"] = new_note
@@ -6722,7 +7516,8 @@ class MarkerMadness:
             return
         r = dlg.result
         ok, err = self._write_marker(rec, r["color"], r["name"],
-                                     r["note"], r["duration"], "")
+                                     r["note"], r["duration"],
+                                     rec.get("custom", ""))
         if ok:
             self._refresh()
         else:
@@ -7009,7 +7804,7 @@ class MarkerMadness:
             for _fid in [clip_offset, left_offset, 0]:
                 ok, _err = self._resolve_add_marker(
                     item, _fid, use_color, rec["name"],
-                    rec["note"], rec["duration"], ""
+                    rec["note"], rec["duration"], rec.get("custom", "")
                 )
                 if ok:
                     used_frame = _fid
@@ -7120,7 +7915,7 @@ class MarkerMadness:
             for _fid in [clip_offset, left_offset, 0]:
                 ok, _err = self._resolve_add_marker(
                     item, _fid, use_color, rec["name"],
-                    rec["note"], rec["duration"], ""
+                    rec["note"], rec["duration"], rec.get("custom", "")
                 )
                 if ok:
                     used_frame = _fid
@@ -7217,7 +8012,7 @@ class MarkerMadness:
                     continue
                 ok, _ = self._resolve_add_marker(
                     item, new_mf, rec["color"], rec["name"],
-                    rec["note"], rec["duration"], ""
+                    rec["note"], rec["duration"], rec.get("custom", "")
                 )
                 if ok:
                     self._resolve_delete_marker(item, old_mf)
@@ -7327,7 +8122,7 @@ class MarkerMadness:
                 if was_move and clip_item:
                     self._resolve_add_marker(
                         clip_item, clip_mf, rec["color"], rec["name"],
-                        rec["note"], rec["duration"], ""
+                        rec["note"], rec["duration"], rec.get("custom", "")
                     )
                 redo_batch.append(entry)
 
@@ -7347,7 +8142,7 @@ class MarkerMadness:
                     if src:
                         self._resolve_add_marker(
                             src, src_offset, rec["color"], rec["name"],
-                            rec["note"], rec["duration"], ""
+                            rec["note"], rec["duration"], rec.get("custom", "")
                         )
                 redo_batch.append(entry)
 
@@ -7378,7 +8173,7 @@ class MarkerMadness:
                     _, old_mf, new_mf, rec, item = entry
                     self._resolve_add_marker(
                         item, old_mf, rec["color"], rec["name"],
-                        rec["note"], rec["duration"], ""
+                        rec["note"], rec["duration"], rec.get("custom", "")
                     )
                     self._resolve_delete_marker(item, new_mf)
                     redo_batch.append(("clip", new_mf, old_mf, rec, item))
@@ -7413,7 +8208,7 @@ class MarkerMadness:
                         item = fresh
                 ok, _ = self._resolve_add_marker(
                     item, clip_offset, rec["color"], rec["name"],
-                    rec["note"], rec["duration"], ""
+                    rec["note"], rec["duration"], rec.get("custom", "")
                 )
                 if ok:
                     if was_move:
@@ -7445,7 +8240,7 @@ class MarkerMadness:
                     continue
                 ok, _ = self._resolve_add_marker(
                     dst, dst_offset, use_color, rec["name"],
-                    rec["note"], rec["duration"], ""
+                    rec["note"], rec["duration"], rec.get("custom", "")
                 )
                 if ok:
                     if was_move:
@@ -7479,7 +8274,7 @@ class MarkerMadness:
                 ok, _ = self._resolve_add_marker(
                     item, clip_offset,
                     rec_data.get("color", "Blue"), rec_data.get("name", ""),
-                    rec_data.get("note", ""), rec_data.get("duration", 1), ""
+                    rec_data.get("note", ""), rec_data.get("duration", 1), rec_data.get("custom", "")
                 )
                 if ok:
                     undo_batch.append(entry)
@@ -7501,7 +8296,7 @@ class MarkerMadness:
                     _, redo_to, redo_from, rec, item = entry
                     ok, _ = self._resolve_add_marker(
                         item, redo_to, rec["color"], rec["name"],
-                        rec["note"], rec["duration"], ""
+                        rec["note"], rec["duration"], rec.get("custom", "")
                     )
                     if ok:
                         self._resolve_delete_marker(item, redo_from)
@@ -7612,6 +8407,7 @@ class MarkerMadness:
         color_f  = self._filter_color.get()
         type_f   = self._filter_type.get()
         track_f  = self._filter_track.get() if hasattr(self, "_filter_track") else "All Tracks"
+        vfx_f    = self._filter_vfx.get() if hasattr(self, "_filter_vfx") else "All"
         search_f = self._search_var.get().strip().lower()
         sel_ids  = set(self._tree.selection())
 
@@ -7620,6 +8416,9 @@ class MarkerMadness:
             if (color_f == "All" or r["color"] == color_f)
             and (type_f == "All Types" or r["type"] == type_f)
             and self._track_filter_ok(r, track_f)
+            and (vfx_f == "All"
+                 or (vfx_f == "VFX only" and r.get("vfx"))
+                 or (vfx_f == "Non-VFX"  and not r.get("vfx")))
             and (not search_f or search_f in " ".join([
                 r.get("name", ""), r.get("note", ""), r.get("clip_name", "")
             ]).lower())
@@ -7966,6 +8765,7 @@ class MarkerMadness:
                 "type":      esc(rec.get("type", "")),
                 "timecode":  tc,
                 "color":     color_cell,
+                "vfx":       "✓" if rec.get("vfx") else "",
                 "name":      esc(rec.get("name", "")),
                 "note":      esc(rec.get("note", "")),
                 "clip":      esc(rec.get("clip_name", "")),

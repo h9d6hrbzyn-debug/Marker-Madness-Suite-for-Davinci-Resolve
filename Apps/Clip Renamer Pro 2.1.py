@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clip Renamer Pro 2.0 — DaVinci Resolve Clip & Timeline Renamer
+Clip Renamer Pro 2.1 — DaVinci Resolve Clip & Timeline Renamer
 
 Renames clips and/or timelines selected in the Resolve Media Pool bin.
 Part of the Marker Madness suite.
@@ -291,7 +291,9 @@ def apply_transform(text, *, find="", replace="", add="", add_pos="After",
                     replace_all=False, trim=False, trim_begin=0, trim_end=0,
                     counter=0, counter_enabled=False, counter_digits=2,
                     counter_pos="After", upper=False, lower=False,
-                    title_case=False, remove_digits=False):
+                    title_case=False, remove_digits=False,
+                    version_enabled=False, version_tag="_v",
+                    version_number=1, version_digits=1):
     n = text
     if trim and (trim_begin > 0 or trim_end > 0):
         end_idx = len(n) - trim_end if trim_end > 0 else len(n)
@@ -319,6 +321,12 @@ def apply_transform(text, *, find="", replace="", add="", add_pos="After",
             n = n + cs
             if add_pos == "After counter" and add:
                 n = n + add
+    # Version tag is always last — after the counter and after anything the
+    # "After counter" option appended. A version suffix that isn't at the very
+    # end of the name isn't a version suffix.
+    if version_enabled:
+        num = str(max(0, int(version_number))).zfill(max(1, int(version_digits)))
+        n = n + version_tag + num
     return n.strip()
 
 # ---------------------------------------------------------------------------
@@ -396,7 +404,7 @@ class ClipRenamerPro:
         _tb.pack(fill="x")
         tk.Label(_tb, text="  Clip Renamer Pro", fg=ACCENT, bg=TITLE_BG,
                  font=("Avenir Next", 18)).pack(side="left")
-        tk.Label(_tb, text="v2.0", fg=DIM, bg=TITLE_BG,
+        tk.Label(_tb, text="v2.1", fg=DIM, bg=TITLE_BG,
                  font=("Avenir Next", 10)).pack(side="left", pady=(6, 0))
         _info = tk.Frame(_tb, bg=TITLE_BG)
         _info.pack(side="right", padx=12)
@@ -538,9 +546,23 @@ class ClipRenamerPro:
         spin(tc_grid, self._ctr_digits_var, 1, 5,    width=4).grid(row=1, column=2, sticky="w", padx=PAD_SPIN)
         lbl(tc_grid, "Start:").grid(row=1, column=3, sticky="e", padx=PAD_LBL)
         spin(tc_grid, self._ctr_start_var,  0, 9999, width=4).grid(row=1, column=4, sticky="w", padx=PAD_SPIN)
+        lbl(tc_grid, "Step:").grid(row=1, column=5, sticky="e", padx=PAD_LBL)
+        spin(tc_grid, self._ctr_step_var, 1, 9999, width=4).grid(row=1, column=6, sticky="w", padx=PAD_SPIN)
         combo(tc_grid, self._ctr_pos_var, ["After name", "Before name"], width=12).grid(row=1, column=7, sticky="w", padx=(12, 0))
-        lbl(tc_grid, "Step:").grid(row=2, column=1, sticky="e", padx=PAD_LBL, pady=(0, 3))
-        spin(tc_grid, self._ctr_step_var, 1, 9999, width=4).grid(row=2, column=2, sticky="w", padx=PAD_SPIN)
+
+        # Version — appended last, after everything else in the chain
+        self._ver_var        = tk.BooleanVar()
+        self._ver_tag_var    = entry_var()
+        self._ver_num_var    = spin_var(1)
+        self._ver_digits_var = spin_var(1)
+        self._ver_tag_var.set("_v")   # after its siblings — setting it fires a preview
+        check(tc_grid, "Version", self._ver_var).grid(row=2, column=0, sticky="w", padx=(0, 4), pady=3)
+        lbl(tc_grid, "Tag:").grid(row=2, column=1, sticky="e", padx=PAD_LBL)
+        entry(tc_grid, self._ver_tag_var, width=5).grid(row=2, column=2, sticky="w", padx=PAD_SPIN)
+        lbl(tc_grid, "No:").grid(row=2, column=3, sticky="e", padx=PAD_LBL)
+        spin(tc_grid, self._ver_num_var, 0, 999, width=4).grid(row=2, column=4, sticky="w", padx=PAD_SPIN)
+        lbl(tc_grid, "Digits:").grid(row=2, column=5, sticky="e", padx=PAD_LBL)
+        spin(tc_grid, self._ver_digits_var, 1, 3, width=4).grid(row=2, column=6, sticky="w", padx=PAD_SPIN)
 
         # Case / Remove digits
         r = row(ops)
@@ -643,6 +665,10 @@ class ClipRenamerPro:
             lower           = self._lower_var.get(),
             title_case      = self._title_var.get(),
             remove_digits   = self._nodig_var.get(),
+            version_enabled = self._ver_var.get(),
+            version_tag     = self._ver_tag_var.get(),
+            version_number  = self._ver_num_var.get(),
+            version_digits  = self._ver_digits_var.get(),
         )
 
     def _get_selected(self):
@@ -696,7 +722,7 @@ class ClipRenamerPro:
             return
 
         step      = self._ctr_step_var.get()
-        counter   = self._ctr_start_var.get() * step
+        counter   = self._ctr_start_var.get()   # Start IS the first number
         sel_lines = []
         prv_lines = []
 
@@ -782,7 +808,7 @@ class ClipRenamerPro:
     def _do_rename(self, filter_type):
         sel     = self._get_selected()
         step    = self._ctr_step_var.get()
-        counter = self._ctr_start_var.get() * step
+        counter = self._ctr_start_var.get()     # Start IS the first number
         changed = 0
         batch   = []   # collects (obj, old_name) for this operation only
 
@@ -877,6 +903,10 @@ class ClipRenamerPro:
         self._ctr_digits_var.set(2)
         self._ctr_start_var.set(1)
         self._ctr_step_var.set(1)
+        self._ver_var.set(False)
+        self._ver_tag_var.set("_v")
+        self._ver_num_var.set(1)
+        self._ver_digits_var.set(1)
         self._upper_var.set(False)
         self._lower_var.set(False)
         self._title_var.set(False)
