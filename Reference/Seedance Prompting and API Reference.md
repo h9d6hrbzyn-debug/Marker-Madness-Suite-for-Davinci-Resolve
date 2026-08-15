@@ -253,18 +253,39 @@ parameters. Violations → errors (`InvalidParameter.TaskTypeConstraint` async, 
 | Real faces always rejected | ModelArk-only fence; our Fal/Kling route differs **[FIELD]**. |
 | Prompt-enhancement flags on API platforms | Can *hurt* structured prompts — the structure carries the information. Keep optimizers off for template prompts. |
 
-## 11. Official prompt-optimization skills (not yet captured)
+## 11. Official prompt-optimization skills
 
-ByteDance ships two Claude-style skills we haven't ingested yet (their CDN is blocked from
-the cloud session; grab on a Mac and paste in):
+The official **2.5 skill (`sd25-pe`, v0.1.1)** is captured in this folder as
+`sd25-pe SKILL.md` — reviewed and clean (pure prompt-engineering instructions; no file,
+network, or tool access needed). Install locally with:
 
 ```bash
 npx --yes skills@latest add \
   "https://arkdocs-en.tos-ap-southeast-1.volces.com/skills/" \
-  --skill sd25-pe --yes     # 2.5 — usage: /sd25-pe + prompt
+  --skill sd25-pe --yes     # usage: /sd25-pe + prompt
 ```
 
-The 2.0 skill (`/sd2-pe`) is distributed as a SKILL.md from their docs page.
+Standout rules the skill adds beyond the docs **[OFFICIAL]**:
+
+- **`【Unused Assets】` closure** — every attached-but-unused asset is listed and explicitly
+  deactivated, so downstream prompt enhancers can't reactivate them.
+- **Parameter separation** — ratio/duration/resolution/fps/audio-toggle are API parameters,
+  never prose in the prompt.
+- **Routing gate** — if the requested output ratio/duration conflicts with a reference video,
+  the task is *not* editing; it becomes generation with the sentence
+  `Please note that this is not video editing.` placed after the goal.
+- **Editing scope closure** — every edit prompt ends with "everything not explicitly modified
+  remains unchanged" (or the retain-only variant).
+- **Keyframe role sentences are verbatim**: `Use @ImageN as the first frame.` — never weakened
+  to "as a composition reference."
+- **Mapping priority chain**: user's explicit spec > prompt text > asset content > filename >
+  upload order (order = tie-breaker only, never evidence of identity).
+- **Motion-slot replacement** for swapping moving subjects: remove original, inherit exact
+  timing/path/speed/occlusions, declare the original gone.
+- ⚠ One behavior to know: the skill self-updates (`npx skills update sd25-pe`) on first
+  trigger per session — its instructions can change between versions; re-review after updates.
+
+The 2.0 skill (`/sd2-pe`) is distributed as a SKILL.md from their docs page — not yet captured.
 
 ---
 
