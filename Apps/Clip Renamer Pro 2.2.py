@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clip Renamer Pro 2.1 — DaVinci Resolve Clip & Timeline Renamer
+Clip Renamer Pro 2.2 — DaVinci Resolve Clip & Timeline Renamer
 
 Renames clips and/or timelines selected in the Resolve Media Pool bin.
 Part of the Marker Madness suite.
@@ -248,10 +248,10 @@ BTN_HOV  = "#626262"
 ENTRY_BG = "#1e1e1e"
 TITLE_BG = "#1a1a1a"
 DIM      = "#909090"
-GREEN    = "#388E3C"
-BLUE     = "#1976D2"
+GREEN    = "#2E7D32"
+BLUE     = "#1565C0"
 PURPLE   = "#7B1FA2"
-RED      = "#E53935"
+RED      = "#B71C1C"
 
 F_MAIN   = ("Avenir Next", 12)
 F_SMALL  = ("Avenir Next", 10)
@@ -272,10 +272,30 @@ def _hover_color(hex_color, factor=0.18):
     b = min(255, int(b + (255 - b) * factor))
     return f"#{r:02x}{g:02x}{b:02x}"
 
-BTN_TEXT = "#111111"
+BTN_INK_DARK  = "#111111"
+BTN_INK_LIGHT = "#F5F5F5"
+
+
+def _ink_for(face):
+    """Pick whichever ink reads better on this face (see Marker Madness)."""
+    def _lum(h):
+        ch = [int(h.lstrip("#")[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        ch = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+              for c in ch]
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+
+    def _contrast(a, b):
+        la, lb = _lum(a), _lum(b)
+        hi, lo = max(la, lb), min(la, lb)
+        return (hi + 0.05) / (lo + 0.05)
+
+    return (BTN_INK_DARK
+            if _contrast(BTN_INK_DARK, face) >= _contrast(BTN_INK_LIGHT, face)
+            else BTN_INK_LIGHT)
 
 class TBtn(tk.Button):
-    def __init__(self, parent, bg=BTN, fg=BTN_TEXT, padx=12, pady=6, font=F_MAIN, **kw):
+    def __init__(self, parent, bg=BTN, fg=None, padx=12, pady=6, font=F_MAIN, **kw):
+        fg = fg or _ink_for(bg)
         _hov = _hover_color(bg)
         super().__init__(parent, bg=bg, fg=fg, relief="flat",
                          activebackground=_hov, activeforeground=fg,
@@ -404,7 +424,7 @@ class ClipRenamerPro:
         _tb.pack(fill="x")
         tk.Label(_tb, text="  Clip Renamer Pro", fg=ACCENT, bg=TITLE_BG,
                  font=("Avenir Next", 18)).pack(side="left")
-        tk.Label(_tb, text="v2.1", fg=DIM, bg=TITLE_BG,
+        tk.Label(_tb, text="v2.2", fg=DIM, bg=TITLE_BG,
                  font=("Avenir Next", 10)).pack(side="left", pady=(6, 0))
         _info = tk.Frame(_tb, bg=TITLE_BG)
         _info.pack(side="right", padx=12)
@@ -537,7 +557,7 @@ class ClipRenamerPro:
         spin(tc_grid, self._trim_end_var,   0, 100, width=4).grid(row=0, column=4, sticky="w", padx=PAD_SPIN)
 
         self._counter_var    = tk.BooleanVar()
-        self._ctr_digits_var = spin_var(2)
+        self._ctr_digits_var = spin_var(3)
         self._ctr_start_var  = spin_var(1)
         self._ctr_step_var   = spin_var(1)
         self._ctr_pos_var    = tk.StringVar(value="After name")
@@ -550,19 +570,29 @@ class ClipRenamerPro:
         spin(tc_grid, self._ctr_step_var, 1, 9999, width=4).grid(row=1, column=6, sticky="w", padx=PAD_SPIN)
         combo(tc_grid, self._ctr_pos_var, ["After name", "Before name"], width=12).grid(row=1, column=7, sticky="w", padx=(12, 0))
 
+        # Live readout of the first three numbers, so "Start" can never be
+        # mistaken for a multiplier again.
+        self._ctr_hint = tk.Label(tc_grid, text="", fg=TEXT, bg=PANEL, anchor="w",
+                                  font=("Avenir Next", 11, "italic"))
+        self._ctr_hint.grid(row=2, column=3, columnspan=5, sticky="w", padx=(4, 0))
+        TBtn(tc_grid, text="\u21a7  Continue from highest",
+             command=self._continue_from_highest,
+             padx=8, pady=3, font=F_SMALL).grid(
+                 row=2, column=0, columnspan=3, sticky="w", pady=(2, 4))
+
         # Version — appended last, after everything else in the chain
         self._ver_var        = tk.BooleanVar()
         self._ver_tag_var    = entry_var()
         self._ver_num_var    = spin_var(1)
         self._ver_digits_var = spin_var(1)
         self._ver_tag_var.set("_v")   # after its siblings — setting it fires a preview
-        check(tc_grid, "Version", self._ver_var).grid(row=2, column=0, sticky="w", padx=(0, 4), pady=3)
-        lbl(tc_grid, "Tag:").grid(row=2, column=1, sticky="e", padx=PAD_LBL)
-        entry(tc_grid, self._ver_tag_var, width=5).grid(row=2, column=2, sticky="w", padx=PAD_SPIN)
-        lbl(tc_grid, "No:").grid(row=2, column=3, sticky="e", padx=PAD_LBL)
-        spin(tc_grid, self._ver_num_var, 0, 999, width=4).grid(row=2, column=4, sticky="w", padx=PAD_SPIN)
-        lbl(tc_grid, "Digits:").grid(row=2, column=5, sticky="e", padx=PAD_LBL)
-        spin(tc_grid, self._ver_digits_var, 1, 3, width=4).grid(row=2, column=6, sticky="w", padx=PAD_SPIN)
+        check(tc_grid, "Version", self._ver_var).grid(row=3, column=0, sticky="w", padx=(0, 4), pady=3)
+        lbl(tc_grid, "Tag:").grid(row=3, column=1, sticky="e", padx=PAD_LBL)
+        entry(tc_grid, self._ver_tag_var, width=5).grid(row=3, column=2, sticky="w", padx=PAD_SPIN)
+        lbl(tc_grid, "No:").grid(row=3, column=3, sticky="e", padx=PAD_LBL)
+        spin(tc_grid, self._ver_num_var, 0, 999, width=4).grid(row=3, column=4, sticky="w", padx=PAD_SPIN)
+        lbl(tc_grid, "Digits:").grid(row=3, column=5, sticky="e", padx=PAD_LBL)
+        spin(tc_grid, self._ver_digits_var, 1, 3, width=4).grid(row=3, column=6, sticky="w", padx=PAD_SPIN)
 
         # Case / Remove digits
         r = row(ops)
@@ -671,6 +701,68 @@ class ClipRenamerPro:
             version_digits  = self._ver_digits_var.get(),
         )
 
+    def _refresh_ctr_hint(self):
+        """Show the first three numbers the current settings actually produce."""
+        if not hasattr(self, "_ctr_hint"):
+            return
+        try:
+            digits = self._ctr_digits_var.get()
+            start  = self._ctr_start_var.get()
+            step   = self._ctr_step_var.get()
+        except tk.TclError:
+            return          # a spinbox is mid-edit
+        seq = ", ".join(str(start + i * step).zfill(digits) for i in range(3))
+        self._ctr_hint.config(
+            text=f"Start {start}, Step {step}  \u2192  {seq}, \u2026")
+
+    def _highest_existing_number(self):
+        """Largest trailing number across the current bin, not just the selection.
+
+        A selection changes what you are renaming, not which numbers are
+        already taken. Falls back to the selection if the bin can't be read.
+        """
+        names = []
+        try:
+            folder = self._media_pool.GetCurrentFolder() if self._media_pool else None
+            if folder:
+                for clip in (folder.GetClipList() or []):
+                    props = clip.GetClipProperty() or {}
+                    names.append(props.get("Clip Name", "") or clip.GetName() or "")
+        except Exception:
+            names = []
+        if not names:
+            sel = self._get_selected()
+            names = [it["name"] for it in sel["clips"] + sel["timelines"]]
+
+        highest = None
+        for name in names:
+            tail = ""
+            for ch in reversed(str(name).rstrip()):
+                if not ch.isdigit():
+                    break
+                tail = ch + tail
+            if tail:
+                val = int(tail)
+                if highest is None or val > highest:
+                    highest = val
+        return highest
+
+    def _continue_from_highest(self):
+        """Set Start to one step past the highest number already in use."""
+        highest = self._highest_existing_number()
+        if highest is None:
+            self._status_var.set("No numbered clips found - Start left as it is.")
+            return
+        try:
+            step = self._ctr_step_var.get()
+        except tk.TclError:
+            step = 1
+        self._counter_var.set(True)
+        self._ctr_start_var.set(highest + step)
+        self._status_var.set(
+            f"Highest existing number is {highest} - Start set to {highest + step}.")
+        self._schedule_preview()
+
     def _get_selected(self):
         result = {"clips": [], "timelines": []}
         if not self._media_pool or not self._project:
@@ -711,6 +803,15 @@ class ClipRenamerPro:
 
     def _update_preview(self):
         self._preview_job = None
+        self._refresh_ctr_hint()
+        try:
+            self._render_preview()
+        except tk.TclError:
+            # Clearing Start to type a new number leaves IntVar.get() with
+            # nothing to parse; the next keystroke fires this again.
+            pass
+
+    def _render_preview(self):
         sel   = self._get_selected()
         total = len(sel["clips"]) + len(sel["timelines"])
 
@@ -807,8 +908,12 @@ class ClipRenamerPro:
 
     def _do_rename(self, filter_type):
         sel     = self._get_selected()
-        step    = self._ctr_step_var.get()
-        counter = self._ctr_start_var.get()     # Start IS the first number
+        try:
+            step    = self._ctr_step_var.get()
+            counter = self._ctr_start_var.get()  # Start IS the first number
+        except tk.TclError:
+            self._status_var.set("Counter fields are mid-edit - check Start and Step.")
+            return
         changed = 0
         batch   = []   # collects (obj, old_name) for this operation only
 
@@ -900,7 +1005,7 @@ class ClipRenamerPro:
         self._trim_begin_var.set(0)
         self._trim_end_var.set(0)
         self._counter_var.set(False)
-        self._ctr_digits_var.set(2)
+        self._ctr_digits_var.set(3)
         self._ctr_start_var.set(1)
         self._ctr_step_var.set(1)
         self._ver_var.set(False)

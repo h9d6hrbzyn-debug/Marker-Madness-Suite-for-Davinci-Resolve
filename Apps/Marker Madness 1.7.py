@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Marker Madness 1.6 — DaVinci Resolve Marker Manager
+Marker Madness 1.7 — DaVinci Resolve Marker Manager
 ===================================================
 A GUI tool to view, add, edit, delete, and export both timeline markers
 and clip-based markers in your current DaVinci Resolve timeline.
@@ -378,6 +378,50 @@ PURPLE  = "#B07CC6"
 POOL_BLUE = "#3B9FD4"   # Media Pool mode hue — distinct from timeline orange
 DIM     = "#707070"
 
+# Buttons: dark ink on a light face. That is already the house pattern for the
+# coloured buttons (fg=BG on ACCENT), but neutral buttons used mid-grey text on
+# a near-panel grey and read as permanently disabled — DIM on BTN measured
+# 2.09:1 and DIM on BTN_HOV 1.63:1. BTN itself sat 1.20:1 against the dialog
+# panel, so the button shape was invisible and only the label showed.
+BTN_FACE      = "#B4B4B4"   # neutral button face  6.00:1 against the panel
+BTN_FACE_OFF  = "#868686"   # disabled face
+BTN_INK_DARK  = "#111111"
+BTN_INK_LIGHT = "#F5F5F5"
+
+
+def _ink_for(face):
+    """Pick whichever ink reads better on this face.
+
+    Hand-picked foregrounds are how buttons drift out of legibility: the suite
+    had near-black on dark grey in one place and near-white on a pastel in
+    another. Deriving the ink from the face means a new button colour cannot
+    reintroduce the bug.
+    """
+    def _lum(h):
+        ch = [int(h.lstrip("#")[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+        ch = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+              for c in ch]
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+
+    def _contrast(a, b):
+        la, lb = _lum(a), _lum(b)
+        hi, lo = max(la, lb), min(la, lb)
+        return (hi + 0.05) / (lo + 0.05)
+
+    return (BTN_INK_DARK
+            if _contrast(BTN_INK_DARK, face) >= _contrast(BTN_INK_LIGHT, face)
+            else BTN_INK_LIGHT)
+
+def _hover_color(hex_color, factor=0.18):
+    """Lift a face toward white so hover works on any button colour."""
+    r = int(hex_color[1:3], 16)
+    g = int(hex_color[3:5], 16)
+    b = int(hex_color[5:7], 16)
+    r = min(255, int(r + (255 - r) * factor))
+    g = min(255, int(g + (255 - g) * factor))
+    b = min(255, int(b + (255 - b) * factor))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
 F_MAIN  = ("Avenir Next", 12)
 F_BOLD  = ("Avenir Next", 13, "bold")
 F_SMALL = ("Avenir Next", 10)
@@ -748,11 +792,11 @@ class MarkerRenamerDialog(tk.Toplevel):
         cf_row = tk.Frame(cf, bg=DLG)
         cf_row.pack(fill="x", padx=8, pady=6)
         TBtn(cf_row, text="Name  →  Note", command=lambda: self._copy_field("name_to_note"),
-             bg=ACCENT, fg=BG, padx=10, pady=4).pack(side="left", padx=(0, 6))
+             bg=ACCENT, padx=10, pady=4).pack(side="left", padx=(0, 6))
         TBtn(cf_row, text="Note  →  Name", command=lambda: self._copy_field("note_to_name"),
-             bg=ACCENT, fg=BG, padx=10, pady=4).pack(side="left", padx=(0, 6))
+             bg=ACCENT, padx=10, pady=4).pack(side="left", padx=(0, 6))
         TBtn(cf_row, text="Clip Name  →  Marker Name", command=self._copy_clip_name,
-             bg=ACCENT, fg=BG, padx=10, pady=4).pack(side="left")
+             bg=ACCENT, padx=10, pady=4).pack(side="left")
 
         ops = section(body, "RENAME OPERATIONS")
 
@@ -843,7 +887,7 @@ class MarkerRenamerDialog(tk.Toplevel):
         _spinbox(tc, self._trim_end_var,   0, 999).grid(row=0, column=4, padx=(0, 4))
 
         self._counter_var    = tk.BooleanVar(value=False)
-        self._ctr_digits_var = tk.IntVar(value=2)
+        self._ctr_digits_var = tk.IntVar(value=3)
         self._ctr_start_var  = tk.IntVar(value=1)
         self._ctr_step_var   = tk.IntVar(value=1)
         self._ctr_pos_var    = tk.StringVar(value="After")
@@ -864,9 +908,18 @@ class MarkerRenamerDialog(tk.Toplevel):
         # Step row — indented under Counter
         _lbl(tc, "Step:",   row=2, col=1)
         _spinbox(tc, self._ctr_step_var, 1, 9999).grid(row=2, column=2, padx=(0, 4))
-        tk.Label(tc, text="Start 10, Step 10 → 010, 020, 030  for VFX sequencing", fg=TEXT, bg=DLG,
-                 font=("Avenir Next", 11, "italic")).grid(
-                     row=2, column=3, columnspan=4, sticky="w", padx=(4, 0))
+        # Live readout of the first three numbers. A static example could
+        # disagree with the fields right next to it (it promised 010, 020, 030
+        # while Digits shipped at 2, which yields 40, 50, 60). This cannot.
+        self._ctr_hint = tk.Label(tc, text="", fg=TEXT, bg=DLG, anchor="w",
+                                  font=("Avenir Next", 11, "italic"))
+        self._ctr_hint.grid(row=2, column=3, columnspan=4, sticky="w", padx=(4, 0))
+
+        # Continue numbering past whatever is already in the timeline.
+        TBtn(tc, text="↧  Continue from highest",
+             command=self._continue_from_highest,
+             padx=8, pady=3, font=F_SMALL).grid(
+                 row=3, column=0, columnspan=4, sticky="w", pady=(2, 4))
 
         # Version row — appended last, after the counter
         self._ver_var        = tk.BooleanVar(value=False)
@@ -874,23 +927,23 @@ class MarkerRenamerDialog(tk.Toplevel):
         self._ver_num_var    = tk.IntVar(value=1)
         self._ver_digits_var = tk.IntVar(value=1)
 
-        _chk(tc, "Version", self._ver_var, row=3)
-        _lbl(tc, "Tag:", row=3, col=1)
+        _chk(tc, "Version", self._ver_var, row=4)
+        _lbl(tc, "Tag:", row=4, col=1)
         tk.Entry(tc, textvariable=self._ver_tag_var, width=5,
                  bg=FIELD, fg=TEXT, insertbackground=TEXT, relief="flat",
                  font=F_MAIN, highlightthickness=1,
-                 highlightbackground=BTN_HOV).grid(row=3, column=2,
+                 highlightbackground=BTN_HOV).grid(row=4, column=2,
                                                    padx=(0, 4), sticky="w")
         self._ver_tag_var.trace_add("write", lambda *_: self._schedule_preview())
-        _lbl(tc, "No:", row=3, col=3)
-        _spinbox(tc, self._ver_num_var, 0, 999).grid(row=3, column=4, padx=(0, 4))
+        _lbl(tc, "No:", row=4, col=3)
+        _spinbox(tc, self._ver_num_var, 0, 999).grid(row=4, column=4, padx=(0, 4))
         tk.Label(tc, text="Dig:", fg=DIM, bg=DLG,
-                 font=F_SMALL, anchor="e", width=4).grid(row=3, column=5,
+                 font=F_SMALL, anchor="e", width=4).grid(row=4, column=5,
                                                          sticky="e", padx=(6, 2))
-        _spinbox(tc, self._ver_digits_var, 1, 3).grid(row=3, column=6, sticky="w")
+        _spinbox(tc, self._ver_digits_var, 1, 3).grid(row=4, column=6, sticky="w")
         tk.Label(tc, text="always last, after the counter  →  _v1, _v01, -v003",
                  fg=TEXT, bg=DLG, font=("Avenir Next", 11, "italic")).grid(
-                     row=4, column=1, columnspan=6, sticky="w", padx=(4, 0))
+                     row=5, column=1, columnspan=6, sticky="w", padx=(4, 0))
 
         tk.Frame(ops, bg=BTN_HOV, height=1).pack(fill="x", padx=8, pady=2)
 
@@ -952,18 +1005,18 @@ class MarkerRenamerDialog(tk.Toplevel):
         bf = tk.Frame(self, bg=DLG)
         bf.pack(fill="x", padx=12, pady=(4, 12))
 
-        TBtn(bf, text="Clear",   command=self._clear,            bg=ACCENT, fg=BG,
+        TBtn(bf, text="Clear",   command=self._clear,            bg=ACCENT,
              padx=10, pady=5).pack(side="left", padx=(0, 4))
-        TBtn(bf, text="Refresh", command=self._schedule_preview, bg=BTN,
+        TBtn(bf, text="Refresh", command=self._schedule_preview, bg=BTN_FACE,
              padx=10, pady=5).pack(side="left", padx=(0, 4))
         self._undo_btn = TBtn(bf, text="↩  Undo", command=self._undo,
-                              bg=BTN_HOV, fg=DIM, padx=10, pady=5)
+                              bg=BTN_FACE_OFF, padx=10, pady=5)
         self._undo_btn.pack(side="left", padx=4)
         self._redo_btn = TBtn(bf, text="↪  Redo", command=self._redo,
-                              bg=BTN_HOV, fg=DIM, padx=10, pady=5)
+                              bg=BTN_FACE_OFF, padx=10, pady=5)
         self._redo_btn.pack(side="left", padx=(0, 4))
         self._apply_btn = TBtn(bf, text="▶  Apply Changes",
-                               command=self._apply, bg=ACCENT, fg=BG,
+                               command=self._apply, bg=ACCENT,
                                padx=14, pady=5)
         self._apply_btn.pack(side="right")
 
@@ -999,6 +1052,59 @@ class MarkerRenamerDialog(tk.Toplevel):
             remove_digits=self._nodig_var.get(),
         )
 
+    def _refresh_ctr_hint(self):
+        """Show the first three numbers the current settings actually produce."""
+        if not hasattr(self, "_ctr_hint"):
+            return          # called while the dialog is still being built
+        try:
+            digits = self._ctr_digits_var.get()
+            start  = self._ctr_start_var.get()
+            step   = self._ctr_step_var.get()
+        except tk.TclError:
+            return          # mid-edit; the next keystroke refreshes this
+        seq = ", ".join(str(start + i * step).zfill(digits) for i in range(3))
+        self._ctr_hint.config(
+            text=f"Start {start}, Step {step}  \u2192  {seq}, \u2026")
+
+    def _highest_existing_number(self):
+        """Largest trailing number across every marker in the timeline.
+
+        Deliberately scans the full marker list rather than the visible rows:
+        a filter changes what you can see, not which numbers are already taken.
+        Returns None when nothing is numbered.
+        """
+        field   = self._field_var.get()
+        key     = "note" if field == "note" else "name"
+        highest = None
+        for rec in getattr(self._app, "_all_markers", []) or []:
+            tail = ""
+            for ch in reversed(str(rec.get(key, "") or "").rstrip()):
+                if not ch.isdigit():
+                    break
+                tail = ch + tail
+            if tail:
+                val = int(tail)
+                if highest is None or val > highest:
+                    highest = val
+        return highest
+
+    def _continue_from_highest(self):
+        """Set Start to one step past the highest number already in use."""
+        highest = self._highest_existing_number()
+        if highest is None:
+            self._status_var.set(
+                "No numbered markers found — Start left as it is.")
+            return
+        try:
+            step = self._ctr_step_var.get()
+        except tk.TclError:
+            step = 1
+        self._counter_var.set(True)
+        self._ctr_start_var.set(highest + step)
+        self._status_var.set(
+            f"Highest existing number is {highest} — Start set to {highest + step}.")
+        self._schedule_preview()
+
     def _get_targets(self):
         """Return list of rec dicts to operate on, in display order."""
         app = self._app
@@ -1019,6 +1125,16 @@ class MarkerRenamerDialog(tk.Toplevel):
 
     def _update_preview(self):
         self._preview_job = None
+        self._refresh_ctr_hint()
+        try:
+            self._render_preview()
+        except tk.TclError:
+            # A spinbox is empty mid-edit — clearing Start to type "40" leaves
+            # IntVar.get() with nothing to parse. The next keystroke fires this
+            # again with a valid value, so skip this pass rather than blow up.
+            pass
+
+    def _render_preview(self):
         for row in self._preview_tree.get_children():
             self._preview_tree.delete(row)
 
@@ -1130,7 +1246,11 @@ class MarkerRenamerDialog(tk.Toplevel):
         # (start=10, step=10 → 010, 020, 030).
         # 1.6: was start × step, which made "Start: 1" produce 010. A field
         # labelled Start has to be the number you start at.
-        counter = self._ctr_start_var.get()
+        try:
+            counter = self._ctr_start_var.get()
+        except tk.TclError:
+            self._status_var.set("Counter fields are mid-edit — check Start and Step.")
+            return
         undo_batch = []
         errors     = []
 
@@ -1177,17 +1297,17 @@ class MarkerRenamerDialog(tk.Toplevel):
         n = len(self._undo_stack)
         m = len(self._redo_stack)
         if n == 0:
-            self._undo_btn.config(bg=BTN_HOV, fg=DIM, text="↩  Undo")
+            self._undo_btn.config(bg=BTN_FACE_OFF, fg=_ink_for(BTN_FACE_OFF), text="↩  Undo")
         elif n == 1:
-            self._undo_btn.config(bg=ACCENT,  fg=BG,  text="↩  Undo")
+            self._undo_btn.config(bg=ACCENT,  fg=_ink_for(ACCENT),  text="↩  Undo")
         else:
-            self._undo_btn.config(bg=ACCENT,  fg=BG,  text=f"↩  Undo ({n})")
+            self._undo_btn.config(bg=ACCENT,  fg=_ink_for(ACCENT),  text=f"↩  Undo ({n})")
         if m == 0:
-            self._redo_btn.config(bg=BTN_HOV, fg=DIM, text="↪  Redo")
+            self._redo_btn.config(bg=BTN_FACE_OFF, fg=_ink_for(BTN_FACE_OFF), text="↪  Redo")
         elif m == 1:
-            self._redo_btn.config(bg=ACCENT,  fg=BG,  text="↪  Redo")
+            self._redo_btn.config(bg=ACCENT,  fg=_ink_for(ACCENT),  text="↪  Redo")
         else:
-            self._redo_btn.config(bg=ACCENT,  fg=BG,  text=f"↪  Redo ({m})")
+            self._redo_btn.config(bg=ACCENT,  fg=_ink_for(ACCENT),  text=f"↪  Redo ({m})")
 
     def _undo(self):
         if not self._undo_stack:
@@ -1238,7 +1358,7 @@ class MarkerRenamerDialog(tk.Toplevel):
         self._trim_begin_var.set(0)
         self._trim_end_var.set(0)
         self._counter_var.set(False)
-        self._ctr_digits_var.set(2)
+        self._ctr_digits_var.set(3)
         self._ctr_start_var.set(1)
         self._ctr_step_var.set(1)
         self._ver_var.set(False)
@@ -1312,12 +1432,15 @@ def _attach_entry_menu(widget: tk.Entry):
 # ---------------------------------------------------------------------------
 
 class TBtn(tk.Button):
-    def __init__(self, parent, bg=BTN, fg=TEXT, padx=12, pady=6, font=F_MAIN, **kw):
+    def __init__(self, parent, bg=BTN_FACE, fg=None, padx=12, pady=6,
+                 font=F_MAIN, **kw):
+        fg = fg or _ink_for(bg)
+        _hov = _hover_color(bg)
         super().__init__(parent, bg=bg, fg=fg, relief="flat",
-                         activebackground=BTN_HOV, activeforeground=TEXT,
+                         activebackground=_hov, activeforeground=fg,
                          padx=padx, pady=pady, cursor="hand2", font=font, **kw)
         _bg = bg
-        self.bind("<Enter>", lambda _: self.config(bg=BTN_HOV))
+        self.bind("<Enter>", lambda _: self.config(bg=_hov))
         self.bind("<Leave>", lambda _: self.config(bg=_bg))
 
 # ---------------------------------------------------------------------------
@@ -1426,7 +1549,7 @@ class MarkerDialog(tk.Toplevel):
         if self._is_add:
             TBtn(tc_cell, text="↺ Refresh Position",
                  command=self._refresh_position,
-                 bg=BTN, fg=DIM, padx=6, pady=2).pack(side="left", padx=(8, 0))
+                 bg=BTN_FACE, padx=6, pady=2).pack(side="left", padx=(8, 0))
 
         if marker_type == "Clip":
             tc_e.config(state="disabled", disabledforeground=DIM)
@@ -1462,8 +1585,8 @@ class MarkerDialog(tk.Toplevel):
         # ── Buttons ───────────────────────────────────────────────────────
         bf = tk.Frame(self, bg=DLG)
         bf.grid(row=dur_row + 1, column=0, columnspan=2, pady=12)
-        TBtn(bf, text="Save",   command=self._save,   bg=ACCENT, fg=BG).pack(side="left", padx=8)
-        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT, fg=BG).pack(side="left", padx=8)
+        TBtn(bf, text="Save",   command=self._save,   bg=ACCENT).pack(side="left", padx=8)
+        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT).pack(side="left", padx=8)
 
         self.columnconfigure(1, weight=1)
         self.bind("<Return>",   lambda _: self._save())
@@ -1560,8 +1683,8 @@ class ColorPickDialog(tk.Toplevel):
                      state="readonly", width=18).pack(padx=20, pady=4)
         bf = tk.Frame(self, bg=BG)
         bf.pack(pady=12)
-        TBtn(bf, text="Apply",  command=self._apply, bg=ACCENT, fg=BG).pack(side="left", padx=8)
-        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT, fg=BG).pack(side="left", padx=8)
+        TBtn(bf, text="Apply",  command=self._apply, bg=ACCENT).pack(side="left", padx=8)
+        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT).pack(side="left", padx=8)
         center_on_parent(self, parent)
         self.deiconify()
         self.lift()
@@ -1692,8 +1815,8 @@ class TrackPickDialog(tk.Toplevel):
         # ── Buttons ───────────────────────────────────────────────────────
         bf = tk.Frame(self, bg=BG)
         bf.pack(pady=(8, 16))
-        TBtn(bf, text="OK",     command=self._ok,     bg=ACCENT, fg=BG).pack(side="left", padx=8)
-        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT, fg=BG).pack(side="left", padx=8)
+        TBtn(bf, text="OK",     command=self._ok,     bg=ACCENT).pack(side="left", padx=8)
+        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT).pack(side="left", padx=8)
 
         self.bind("<Return>",   lambda _: self._ok())
         self.bind("<KP_Enter>", lambda _: self._ok())
@@ -1753,7 +1876,7 @@ class AddActionDialog(tk.Toplevel):
         # ── Option 1: single marker at playhead ───────────────────────────
         TBtn(self, text="⊕  Add Single Marker",
              command=lambda: self._pick("playhead"),
-             bg=ACCENT, fg=BG, width=26).pack(padx=36, pady=(0, 4))
+             bg=ACCENT, width=26).pack(padx=36, pady=(0, 4))
         tk.Label(self, text="One marker at the current playhead position",
                  fg=DIM, bg=BG, font=F_SMALL).pack(padx=36, pady=(0, 14))
 
@@ -1763,7 +1886,7 @@ class AddActionDialog(tk.Toplevel):
         # ── Option 2: stamp every clip on a track ─────────────────────────
         TBtn(self, text="⊹  Batch Stamp Track",
              command=lambda: self._pick("stamp_track"),
-             bg=PURPLE, fg=BG, width=26).pack(padx=36, pady=(0, 4))
+             bg=PURPLE, width=26).pack(padx=36, pady=(0, 4))
         tk.Label(self, text="Stamp the same marker on every clip in a track",
                  fg=DIM, bg=BG, font=F_SMALL).pack(padx=36, pady=(0, 18))
 
@@ -1963,14 +2086,14 @@ class StampTrackDialog(tk.Toplevel):
                  **tc_kw).pack(side="left")
         TBtn(self._tc_frame, text="↺ From Timeline",
              command=self._grab_from_tl,
-             bg=BTN_HOV, fg=BG, padx=8, pady=3,
+             bg=BTN_FACE, padx=8, pady=3,
              font=F_SMALL).pack(side="left", padx=(10, 0))
 
         # ── Buttons ───────────────────────────────────────────────────────
         bf = tk.Frame(self, bg=BG)
         bf.pack(pady=(10, 18))
-        TBtn(bf, text="Stamp",  command=self._ok,     bg=ACCENT, fg=BG).pack(side="left", padx=8)
-        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT, fg=BG).pack(side="left", padx=8)
+        TBtn(bf, text="Stamp",  command=self._ok,     bg=ACCENT).pack(side="left", padx=8)
+        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT).pack(side="left", padx=8)
 
         self._update_offset_state()
         self.bind("<Return>",   lambda _: self._ok())
@@ -2201,8 +2324,8 @@ class PromoteOptionsDialog(tk.Toplevel):
 
         bf = tk.Frame(self, bg=BG)
         bf.pack(pady=(4, 16))
-        TBtn(bf, text="OK",     command=self._ok,     bg=ACCENT, fg=BG).pack(side="left", padx=8)
-        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT, fg=BG).pack(side="left", padx=8)
+        TBtn(bf, text="OK",     command=self._ok,     bg=ACCENT).pack(side="left", padx=8)
+        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT).pack(side="left", padx=8)
 
         self.bind("<Return>",   lambda _: self._ok())
         self.bind("<KP_Enter>", lambda _: self._ok())
@@ -2301,8 +2424,8 @@ class PullMetadataDialog(tk.Toplevel):
 
         bf = tk.Frame(self, bg=BG)
         bf.pack(pady=(16, 16))
-        TBtn(bf, text="OK",     command=self._ok,     bg=ACCENT, fg=BG).pack(side="left", padx=8)
-        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT, fg=BG).pack(side="left", padx=8)
+        TBtn(bf, text="OK",     command=self._ok,     bg=ACCENT).pack(side="left", padx=8)
+        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT).pack(side="left", padx=8)
 
         self.bind("<Return>",   lambda _: self._ok())
         self.bind("<KP_Enter>", lambda _: self._ok())
@@ -2394,8 +2517,8 @@ class PasteMarkersDialog(tk.Toplevel):
 
         bf = tk.Frame(self, bg=BG)
         bf.pack(pady=(4, 16))
-        TBtn(bf, text="Paste",  command=self._ok,     bg=ACCENT, fg=BG).pack(side="left", padx=8)
-        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT, fg=BG).pack(side="left", padx=8)
+        TBtn(bf, text="Paste",  command=self._ok,     bg=ACCENT).pack(side="left", padx=8)
+        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT).pack(side="left", padx=8)
 
         self.bind("<Return>",   lambda _: self._ok())
         self.bind("<KP_Enter>", lambda _: self._ok())
@@ -2494,14 +2617,14 @@ class ImportPreviewDialog(tk.Toplevel):
         sf = tk.Frame(self, bg=BG)
         sf.pack(fill="x", padx=16, pady=(6, 2))
         TBtn(sf, text="Check All",        command=self._check_all,
-             bg=BTN, fg=DIM, padx=6, pady=2).pack(side="left", padx=(0, 4))
+             bg=BTN_FACE, padx=6, pady=2).pack(side="left", padx=(0, 4))
         TBtn(sf, text="Uncheck All",      command=self._uncheck_all,
-             bg=BTN, fg=DIM, padx=6, pady=2).pack(side="left", padx=(0, 10))
+             bg=BTN_FACE, padx=6, pady=2).pack(side="left", padx=(0, 10))
         tk.Frame(sf, bg=BTN_HOV, width=1).pack(side="left", fill="y", padx=(0, 10))
         TBtn(sf, text="Check Selected",   command=self._check_selected,
-             bg=BTN, fg=DIM, padx=6, pady=2).pack(side="left", padx=(0, 4))
+             bg=BTN_FACE, padx=6, pady=2).pack(side="left", padx=(0, 4))
         TBtn(sf, text="Uncheck Selected", command=self._uncheck_selected,
-             bg=BTN, fg=DIM, padx=6, pady=2).pack(side="left")
+             bg=BTN_FACE, padx=6, pady=2).pack(side="left")
         self._conflict_var = tk.StringVar()
         tk.Label(sf, textvariable=self._conflict_var,
                  fg="#e6a817", bg=BG, font=F_SMALL).pack(side="right")
@@ -2528,9 +2651,9 @@ class ImportPreviewDialog(tk.Toplevel):
         bf = tk.Frame(self, bg=BG)
         bf.pack(fill="x", padx=16, pady=(6, 12))
         TBtn(bf, text="Cancel", command=self.destroy,
-             bg=BTN, fg=DIM, padx=8).pack(side="right", padx=(4, 0))
+             bg=BTN_FACE, padx=8).pack(side="right", padx=(4, 0))
         self._import_btn = TBtn(bf, text="Import", command=self._do_import,
-                                bg=ACCENT, fg=BG, padx=8)
+                                bg=ACCENT, padx=8)
         self._import_btn.pack(side="right", padx=4)
         self.bind("<Return>",   lambda _: self._do_import())
         self.bind("<KP_Enter>", lambda _: self._do_import())
@@ -2712,7 +2835,7 @@ class MarkerExchangeDialog(tk.Toplevel):
 
         TBtn(pp_frame, text="⬇  Export for Premiere Pro",
              command=self._export_premiere,
-             bg=ACCENT, fg=BG, padx=10, pady=5).pack(anchor="w", padx=14, pady=(0, 12))
+             bg=ACCENT, padx=10, pady=5).pack(anchor="w", padx=14, pady=(0, 12))
 
         # Divider
         tk.Frame(pp_frame, bg=BTN_HOV, height=1).pack(fill="x", padx=14, pady=4)
@@ -2737,7 +2860,7 @@ class MarkerExchangeDialog(tk.Toplevel):
 
         TBtn(pp_frame, text="⬆  Import from Premiere Pro",
              command=self._import_premiere,
-             bg=ACCENT, fg=BG, padx=10, pady=5).pack(anchor="w", padx=14, pady=(0, 12))
+             bg=ACCENT, padx=10, pady=5).pack(anchor="w", padx=14, pady=(0, 12))
 
         # ── Avid Media Composer — Coming Soon ──────────────────────────────
         av_frame = tk.LabelFrame(self, text="  Avid Media Composer  ",
@@ -2758,7 +2881,7 @@ class MarkerExchangeDialog(tk.Toplevel):
 
         TBtn(av_frame, text="⬇  Export for Avid Media Composer",
              command=self._export_avid,
-             bg=ACCENT, fg=BG, padx=10, pady=5).pack(anchor="w", padx=14, pady=(0, 12))
+             bg=ACCENT, padx=10, pady=5).pack(anchor="w", padx=14, pady=(0, 12))
 
         tk.Frame(av_frame, bg=BTN_HOV, height=1).pack(fill="x", padx=14, pady=4)
 
@@ -2784,14 +2907,14 @@ class MarkerExchangeDialog(tk.Toplevel):
 
         TBtn(av_frame, text="⬆  Import from Avid Media Composer",
              command=self._import_avid,
-             bg=ACCENT, fg=BG, padx=10, pady=5).pack(anchor="w", padx=14, pady=(0, 12))
+             bg=ACCENT, padx=10, pady=5).pack(anchor="w", padx=14, pady=(0, 12))
 
         # ── Close ───────────────────────────────────────────────────────────
         tk.Frame(self, bg=BTN_HOV, height=1).pack(fill="x", padx=16, pady=(4, 0))
         bf = tk.Frame(self, bg=BG)
         bf.pack(fill="x", padx=16, pady=10)
         TBtn(bf, text="Close", command=self.destroy,
-             bg=ACCENT, fg=BG, padx=14, pady=5).pack(side="right")
+             bg=ACCENT, padx=14, pady=5).pack(side="right")
 
     # ── Export to Premiere Pro ──────────────────────────────────────────────
 
@@ -3230,7 +3353,7 @@ class ShotChangeReportDialog(tk.Toplevel):
                      insertbackground=TEXT, relief="flat",
                      font=F_SMALL).pack(side="left", fill="x", expand=True, padx=(0, 6))
             TBtn(row, text="Browse…", command=cmd,
-                 bg=BTN, fg=DIM, padx=6, pady=2).pack(side="left")
+                 bg=BTN_FACE, padx=6, pady=2).pack(side="left")
 
         th_row = tk.Frame(pf, bg=BG)
         th_row.pack(fill="x", pady=3)
@@ -3240,7 +3363,7 @@ class ShotChangeReportDialog(tk.Toplevel):
                  insertbackground=TEXT, relief="flat",
                  font=F_SMALL).pack(side="left", fill="x", expand=True, padx=(0, 6))
         TBtn(th_row, text="Browse…", command=self._pick_thumbs,
-             bg=BTN, fg=DIM, padx=6, pady=2).pack(side="left")
+             bg=BTN_FACE, padx=6, pady=2).pack(side="left")
         tk.Label(th_row, text="← folder from After timeline's batch frame export",
                  fg=DIM, bg=BG, font=("Avenir Next", 9)).pack(side="left", padx=(8, 0))
 
@@ -3257,7 +3380,7 @@ class ShotChangeReportDialog(tk.Toplevel):
                      values=["Timeline Order", "Marker Name"],
                      state="readonly", width=16).pack(side="left")
         TBtn(of, text="⟳  Generate", command=self._generate,
-             bg=ACCENT, fg=BG).pack(side="right")
+             bg=ACCENT).pack(side="right")
 
         # Results table
         tf = tk.Frame(self, bg=BG)
@@ -3297,14 +3420,14 @@ class ShotChangeReportDialog(tk.Toplevel):
                  fg=TEXT, bg=BG, font=F_SMALL).pack(side="left")
 
         TBtn(bf, text="✕  Close", command=self.destroy,
-             bg=BTN, fg=DIM, padx=8).pack(side="right", padx=(4, 0))
+             bg=BTN_FACE, padx=8).pack(side="right", padx=(4, 0))
         self._export_html_btn = TBtn(bf, text="⬇ Export HTML",
                                      command=self._export_html,
-                                     bg=GREEN, fg=BG, padx=8)
+                                     bg=GREEN, padx=8)
         self._export_html_btn.pack(side="right", padx=4)
         self._export_csv_btn = TBtn(bf, text="⬇ Export CSV",
                                     command=self._export_csv,
-                                    bg=GREEN, fg=BG, padx=8)
+                                    bg=GREEN, padx=8)
         self._export_csv_btn.pack(side="right", padx=4)
         self._export_html_btn.config(state="disabled")
         self._export_csv_btn.config(state="disabled")
@@ -3820,7 +3943,7 @@ class BatchExportDialog(tk.Toplevel):
                  font=F_SMALL).pack()
 
         TBtn(self, text="Cancel", command=self._cancel,
-             bg=RED, fg=BG).pack(pady=12)
+             bg=RED).pack(pady=12)
 
         self._total = total
         center_on_parent(self, parent)
@@ -3872,8 +3995,8 @@ class RenameDialog(tk.Toplevel):
 
         bf = tk.Frame(self, bg=BG)
         bf.pack(pady=12)
-        TBtn(bf, text="Rename", command=self._save, bg=ACCENT, fg=BG).pack(side="left", padx=8)
-        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT, fg=BG).pack(side="left", padx=8)
+        TBtn(bf, text="Rename", command=self._save, bg=ACCENT).pack(side="left", padx=8)
+        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT).pack(side="left", padx=8)
         center_on_parent(self, parent)
         self.deiconify()
         self.lift()
@@ -4010,9 +4133,9 @@ class ExportOptionsDialog(tk.Toplevel):
         preset_row.pack(anchor="w", padx=12, pady=(2, 4))
         tk.Label(preset_row, text="Preset:", fg=DIM, bg=BG, font=F_SMALL).pack(side="left", padx=(0, 6))
         TBtn(preset_row, text="🖨  Print-friendly", command=self._apply_print_preset,
-             bg=ACCENT, fg=BG, font=F_SMALL).pack(side="left", padx=(0, 4))
+             bg=ACCENT, font=F_SMALL).pack(side="left", padx=(0, 4))
         TBtn(preset_row, text="All columns", command=self._apply_all_preset,
-             bg=ACCENT, fg=BG, font=F_SMALL).pack(side="left")
+             bg=ACCENT, font=F_SMALL).pack(side="left")
 
         # Custom label for the Name column
         name_row = tk.Frame(col_frame, bg=BG)
@@ -4037,8 +4160,8 @@ class ExportOptionsDialog(tk.Toplevel):
         # ── Buttons ────────────────────────────────────────────────────
         bf = tk.Frame(self, bg=BG)
         bf.pack(pady=(4, 16))
-        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT, fg=BG).pack(side="left", padx=8)
-        TBtn(bf, text="Export", command=self._export, bg=ACCENT, fg=BG).pack(side="left", padx=8)
+        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT).pack(side="left", padx=8)
+        TBtn(bf, text="Export", command=self._export, bg=ACCENT).pack(side="left", padx=8)
         center_on_parent(self, parent)
         self.deiconify()
         self.lift()
@@ -4199,8 +4322,8 @@ class BatchExportOptionsDialog(tk.Toplevel):
         # ── Buttons ────────────────────────────────────────────────────────
         bf = tk.Frame(self, bg=BG)
         bf.pack(pady=(4, 16))
-        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT, fg=BG).pack(side="left", padx=8)
-        TBtn(bf, text="Export", command=self._export, bg=ACCENT, fg=BG).pack(side="left", padx=8)
+        TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT).pack(side="left", padx=8)
+        TBtn(bf, text="Export", command=self._export, bg=ACCENT).pack(side="left", padx=8)
         center_on_parent(self, parent)
         self.deiconify()
         self.lift()
@@ -4291,8 +4414,8 @@ class ExportFrameOptionsDialog(tk.Toplevel):
         # ── Buttons ────────────────────────────────────────────────────────
         bf = tk.Frame(self, bg=BG)
         bf.pack(pady=(6, 16))
-        TBtn(bf, text="Cancel",   command=self.destroy,  bg=ACCENT, fg=BG).pack(side="left", padx=8)
-        TBtn(bf, text="Continue", command=self._confirm, bg=ACCENT, fg=BG).pack(side="left", padx=8)
+        TBtn(bf, text="Cancel",   command=self.destroy,  bg=ACCENT).pack(side="left", padx=8)
+        TBtn(bf, text="Continue", command=self._confirm, bg=ACCENT).pack(side="left", padx=8)
 
         center_on_parent(self, parent)
         self.deiconify()
@@ -4318,11 +4441,143 @@ class ExportFrameOptionsDialog(tk.Toplevel):
 
 
 # ---------------------------------------------------------------------------
+# Wrapping toolbars
+#
+# Tk's packer does not wrap. Controls that don't fit the window simply fall off
+# the right edge: no scrollbar, no ellipsis, nothing on screen to suggest they
+# exist. The suite's toolbar rows are wider than a laptop display, so on those
+# machines the last controls in a row are unreachable at any window size.
+#
+# These helpers reflow a packed row onto extra lines when it is too narrow, and
+# restore the original single-line packing when there's room again. They read
+# the existing pack() options rather than requiring the rows to be rebuilt.
+# ---------------------------------------------------------------------------
+
+FLOW_LINE_GAP = 4      # vertical space between wrapped lines
+
+
+def _flow_parse_pad(value):
+    """pack_info() reports padx as an int, a str, or a '(left, right)' string."""
+    if isinstance(value, (list, tuple)):
+        nums = [int(v) for v in value]
+    else:
+        text = str(value).strip().strip("()").replace(",", " ")
+        nums = [int(p) for p in text.split() if p.lstrip("-").isdigit()]
+    if not nums:
+        return 0, 0
+    if len(nums) == 1:
+        return nums[0], nums[0]
+    return nums[0], nums[1]
+
+
+def _flow_snapshot(row):
+    """Record each control's pack options once, in left-to-right visual order.
+
+    Must run while the row is still packed normally — pack_info() is the only
+    record of how these controls were laid out.
+    """
+    cached = getattr(row, "_flow_items", None)
+    if cached is not None:
+        return cached
+
+    lefts, rights = [], []
+    for widget in row.pack_slaves():
+        try:
+            info = dict(widget.pack_info())
+        except Exception:
+            continue
+        pad_l, pad_r = _flow_parse_pad(info.get("padx", 0))
+        entry = {"w": widget, "pad_l": pad_l, "pad_r": pad_r,
+                 "fill": str(info.get("fill", "none")), "info": info}
+        (rights if str(info.get("side")) == "right" else lefts).append(entry)
+
+    # side="right" packs outermost-first, so the first one ends up furthest
+    # right. Reverse them to get true visual order for the flow.
+    rights.reverse()
+    row._flow_items = lefts + rights
+    return row._flow_items
+
+
+def _flow_reflow(row, avail_w):
+    """Lay `row` out within avail_w pixels, wrapping onto extra lines if needed."""
+    items = _flow_snapshot(row)
+    if not items or avail_w <= 1:
+        return
+
+    widths, heights = [], []
+    for it in items:
+        try:
+            widths.append(it["w"].winfo_reqwidth() + it["pad_l"] + it["pad_r"])
+            heights.append(it["w"].winfo_reqheight())
+        except Exception:
+            widths.append(0)
+            heights.append(0)
+    if not any(heights):
+        return
+
+    if sum(widths) <= avail_w:
+        # Fits on one line — hand it back to the packer.
+        if getattr(row, "_flow_wrapped", False):
+            for it in items:
+                it["w"].place_forget()
+            row.pack_propagate(True)
+            row.configure(height=1)
+            for it in items:
+                try:
+                    it["w"].pack(**it["info"])
+                except Exception:
+                    pass
+            row._flow_wrapped = False
+        return
+
+    # Pass 1 — assign controls to lines. Each line is only as tall as the
+    # controls actually on it, so one tall control (the stacked Mode toggle)
+    # doesn't inflate every other line. Vertical space is the scarce resource
+    # on the laptop displays this exists for.
+    lines, current, width_used = [], [], 0
+    for idx, w_total in enumerate(widths):
+        if current and width_used + w_total > avail_w:
+            lines.append(current)
+            current, width_used = [], 0
+        current.append(idx)
+        width_used += w_total
+    if current:
+        lines.append(current)
+
+    # Pass 2 — place them.
+    y = 0
+    for line in lines:
+        line_h = max(heights[i] for i in line)
+        x = 0
+        for i in line:
+            it, widget = items[i], items[i]["w"]
+            opts = {"x": x + it["pad_l"]}
+            if it["fill"] in ("y", "both"):
+                # Separator rules rely on fill="y" for their height.
+                opts["y"] = y
+                opts["height"] = line_h
+            else:
+                # pack() centres items of differing heights; match that.
+                opts["y"] = y + max(0, (line_h - heights[i]) // 2)
+            try:
+                widget.pack_forget()
+                widget.place(**opts)
+            except Exception:
+                pass
+            x += widths[i]
+        y += line_h + FLOW_LINE_GAP
+
+    row._flow_wrapped = True
+    row.pack_propagate(False)
+    row.configure(height=max(1, y - FLOW_LINE_GAP + 2))
+
+
+# ---------------------------------------------------------------------------
 # Main application
 # ---------------------------------------------------------------------------
 
 APP_TITLE   = "Marker Madness"
-APP_VERSION = "1.6"
+APP_VERSION = "1.7"
 
 class MarkerMadness:
     def __init__(self, root: tk.Tk):
@@ -4331,12 +4586,10 @@ class MarkerMadness:
         self.root.configure(bg=BG)
         self.root.createcommand('::tk::mac::ShowHelp',
             lambda: webbrowser.open("https://resolve-tools.com/marker-madness-guide"))
-        # Cap the enforced minimum to the screen so small displays never get
-        # a window taller/wider than they can show (crushes the bottom row).
-        self.root.after_idle(lambda: self.root.minsize(
-            min(1300, self.root.winfo_screenwidth() - 80),
-            min(max(self._side_panel.winfo_reqheight(), 750),
-                self.root.winfo_screenheight() - 100)))
+        # Toolbar sizing: measure what the controls need rather than guessing,
+        # and wrap them onto extra lines when the display is too narrow. Both
+        # are deferred until the layout has settled.
+        self.root.after_idle(self._init_toolbar_sizing)
 
         self._resolve      = None
         self._project      = None
@@ -4535,21 +4788,21 @@ class MarkerMadness:
         self._mode_badge.pack(side="left", padx=(14, 0), pady=(2, 0))
 
         # Pack right-side buttons before status_area so they're never squeezed out
-        TBtn(top, text="⟳  Refresh", command=self._refresh, bg=ACCENT, fg=BG).pack(side="right", padx=8)
+        TBtn(top, text="⟳  Refresh", command=self._refresh, bg=ACCENT).pack(side="right", padx=8)
         self._main_undo_btn = TBtn(top, text="↩ Undo",
                                    command=self._main_undo,
-                                   bg=BTN_HOV, fg=DIM)
+                                   bg=BTN_FACE_OFF)
         self._main_undo_btn.pack(side="right", padx=(0, 4))
         self._main_redo_btn = TBtn(top, text="↪ Redo",
                                    command=self._main_redo,
-                                   bg=BTN_HOV, fg=DIM)
+                                   bg=BTN_FACE_OFF)
         self._main_redo_btn.pack(side="right", padx=(0, 4))
         tk.Frame(top, bg=BTN_HOV, width=1).pack(side="right", fill="y", padx=8)
         self._paste_btn = TBtn(top, text="⎗ Paste Markers", command=self._paste_markers,
-                               bg=BTN_HOV, fg=DIM)
+                               bg=BTN_FACE_OFF)
         self._paste_btn.pack(side="right", padx=(0, 4))
         self._copy_btn = TBtn(top, text="⎘ Copy Markers", command=self._copy_markers,
-                              bg=ACCENT, fg=BG)
+                              bg=ACCENT)
         self._copy_btn.pack(side="right", padx=(0, 4))
 
         status_area = tk.Frame(top, bg=PANEL)
@@ -4592,29 +4845,29 @@ class MarkerMadness:
         self._mode = "timeline"
         mode_col = tk.Frame(tb1, bg=BG)
         mode_col.pack(side="left", padx=(0, 10))
-        self._btn_mode_tl = TBtn(mode_col, text="◉ Timeline", bg=ACCENT, fg=BG,
+        self._btn_mode_tl = TBtn(mode_col, text="◉ Timeline", bg=ACCENT,
                                  padx=8, pady=2, font=F_SMALL,
                                  command=lambda: self._set_mode("timeline"))
         self._btn_mode_tl.pack(fill="x", pady=(0, 2))
-        self._btn_mode_pool = TBtn(mode_col, text="○ Media Pool", bg=BTN, fg=DIM,
+        self._btn_mode_pool = TBtn(mode_col, text="○ Media Pool", bg=BTN_FACE,
                                    padx=8, pady=2, font=F_SMALL,
                                    command=lambda: self._set_mode("pool"))
         self._btn_mode_pool.pack(fill="x")
         tk.Frame(tb1, bg=BTN_HOV, width=1).pack(side="left", fill="y", padx=(0, 8))
 
         TBtn(tb1, text="+ Add",            command=self._add_marker_at_playhead,
-             bg=ACCENT, fg=BG).pack(side="left", padx=3)
+             bg=ACCENT).pack(side="left", padx=3)
         TBtn(tb1, text="⊹ Batch Stamp",   command=self._stamp_track_dialog,
-             bg=PURPLE, fg=BG).pack(side="left", padx=3)
+             bg=PURPLE).pack(side="left", padx=3)
         TBtn(tb1, text="✎ Edit",           command=self._edit_marker,
-             bg=ACCENT, fg=BG).pack(side="left", padx=3)
+             bg=ACCENT).pack(side="left", padx=3)
         TBtn(tb1, text="⚡ Batch Rename",   command=self._open_renamer,
-             bg=PURPLE, fg=BG).pack(side="left", padx=3)
+             bg=PURPLE).pack(side="left", padx=3)
 
         TBtn(tb1, text="✕ Delete",         command=self._delete_marker,
-             bg=RED, fg=BG).pack(side="left", padx=3)
+             bg=RED).pack(side="left", padx=3)
         TBtn(tb1, text="✕✕ Delete All",   command=self._delete_all,
-             bg=RED, fg=BG).pack(side="left", padx=3)
+             bg=RED).pack(side="left", padx=3)
 
         # Transfer section — stacked pairs: top row ⬆Timeline, bottom row ⬇Clip
         tk.Frame(tb1, bg=BTN_HOV, width=1).pack(side="left", fill="y", padx=8)
@@ -4629,15 +4882,15 @@ class MarkerMadness:
         copy_col.pack(side="left", padx=3)
         self._btn_copy = TBtn(copy_col, text="⬆ Copy→Timeline",
                               command=lambda: self._promote(move=False),
-                              bg=PURPLE, fg=BG)
+                              bg=PURPLE)
         self._btn_copy.pack(fill="x", pady=(0, 2))
         self._btn_copy_clip = TBtn(copy_col, text="⬇ Copy→Clip",
                                    command=lambda: self._demote(move=False),
-                                   bg=PURPLE, fg=BG)
+                                   bg=PURPLE)
         self._btn_copy_clip.pack(fill="x")
         self._btn_copy_track = TBtn(copy_col, text="⇄ Copy→Track",
                                     command=lambda: self._transfer_track(move=False),
-                                    bg=PURPLE, fg=BG)
+                                    bg=PURPLE)
         self._btn_copy_track.pack(fill="x", pady=(2, 0))
 
         # Move column
@@ -4645,28 +4898,33 @@ class MarkerMadness:
         move_col.pack(side="left", padx=3)
         self._btn_move = TBtn(move_col, text="⬆ Move→Timeline",
                               command=lambda: self._promote(move=True),
-                              bg=PURPLE, fg=BG)
+                              bg=PURPLE)
         self._btn_move.pack(fill="x", pady=(0, 2))
         self._btn_move_clip = TBtn(move_col, text="⬇ Move→Clip",
                                    command=lambda: self._demote(move=True),
-                                   bg=PURPLE, fg=BG)
+                                   bg=PURPLE)
         self._btn_move_clip.pack(fill="x")
         self._btn_move_track = TBtn(move_col, text="⇄ Move→Track",
                                     command=lambda: self._transfer_track(move=True),
-                                    bg=PURPLE, fg=BG)
+                                    bg=PURPLE)
         self._btn_move_track.pack(fill="x", pady=(2, 0))
 
         # Nudge section
         tk.Frame(tb1, bg=BTN_HOV, width=1).pack(side="left", fill="y", padx=8)
         tk.Label(tb1, text="Nudge:", fg=DIM, bg=BG, font=F_SMALL).pack(side="left", padx=(0, 4))
         self._nudge_var = tk.IntVar(value=0)
-        tk.Spinbox(tb1, from_=-9999, to=9999, textvariable=self._nudge_var,
-                   width=6, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT,
-                   buttonbackground=BTN, relief="flat",
-                   font=F_MAIN).pack(side="left")
+        nudge_spin = tk.Spinbox(tb1, from_=-9999, to=9999, textvariable=self._nudge_var,
+                                width=6, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT,
+                                buttonbackground=BTN, relief="flat",
+                                font=F_MAIN)
+        nudge_spin.pack(side="left")
+        # Typing a number and hitting Enter is the obvious gesture — without
+        # this the only trigger is the Apply button.
+        nudge_spin.bind("<Return>",   lambda _: self._nudge_markers())
+        nudge_spin.bind("<KP_Enter>", lambda _: self._nudge_markers())
         tk.Label(tb1, text="f", fg=DIM, bg=BG, font=F_SMALL).pack(side="left", padx=(2, 6))
         TBtn(tb1, text="Apply", command=self._nudge_markers,
-             bg=ACCENT, fg=BG).pack(side="left", padx=(0, 6))
+             bg=ACCENT).pack(side="left", padx=(0, 6))
         self._nudge_auto_var = tk.BooleanVar(value=False)
         tk.Checkbutton(tb1, text="Skip Confirm", variable=self._nudge_auto_var,
                        fg=TEXT, bg=BG, activeforeground=TEXT, activebackground=BG,
@@ -4683,7 +4941,7 @@ class MarkerMadness:
         fcb.pack(side="left")
         fcb.bind("<<ComboboxSelected>>", lambda _: self._populate_table())
         TBtn(tb2, text="✕", command=self._reset_color_filter,
-             bg=BTN, fg=DIM, padx=5, pady=2).pack(side="left", padx=(2, 0))
+             bg=BTN_FACE, padx=5, pady=2).pack(side="left", padx=(2, 0))
 
         tk.Label(tb2, text="Type:", fg=TEXT, bg=BG, font=F_SMALL).pack(side="left", padx=(16, 3))
         self._filter_type = tk.StringVar(value="All Types")
@@ -4717,7 +4975,7 @@ class MarkerMadness:
         self._search_var.trace_add("write", self._on_search_changed)
         _attach_entry_menu(self._search_entry)
         TBtn(tb2, text="✕", command=self._clear_search,
-             bg=BTN, fg=DIM, padx=5, pady=2).pack(side="left", padx=(2, 0))
+             bg=BTN_FACE, padx=5, pady=2).pack(side="left", padx=(2, 0))
 
         # Search filter checkboxes
         sf = tk.Frame(tb2, bg=BG)
@@ -4739,34 +4997,38 @@ class MarkerMadness:
                            command=self._populate_table).pack(side="left", padx=(0, 4))
 
         TBtn(tb2, text="⬇ Export CSV", command=self._export_csv,
-             bg=GREEN, fg=BG).pack(side="right", padx=3)
+             bg=GREEN).pack(side="right", padx=3)
         TBtn(tb2, text="⬆ Import CSV", command=self._import_csv,
-             bg=GREEN, fg=BG).pack(side="right", padx=3)
+             bg=GREEN).pack(side="right", padx=3)
         tk.Checkbutton(tb2, text="Preview Import", variable=self._import_preview_var,
                        fg=TEXT, bg=BG, activeforeground=TEXT, activebackground=BG,
                        selectcolor=ENTRY_BG, font=F_SMALL).pack(side="right", padx=(0, 2))
         tk.Frame(tb2, bg=BTN_HOV, width=1).pack(side="right", fill="y", padx=8)
         TBtn(tb2, text="↺ Reset Column Layout", command=self._reset_layout,
-             bg=BTN, fg=DIM).pack(side="right", padx=3)
+             bg=BTN_FACE).pack(side="right", padx=3)
 
         # Toolbar row 3 — VFX designation / reports / exchange
         tb3 = tk.Frame(self.root, bg=BG, pady=2)
         tb3.pack(fill="x", padx=12)
 
+        # Measured by _natural_min_size to keep the window wide enough that no
+        # toolbar control ends up off the right edge.
+        self._toolbar_rows = [tb1, tb2, tb3]
+
         tk.Label(tb3, text="VFX:", fg=TEXT, bg=BG, font=F_SMALL).pack(side="left", padx=(0, 4))
         TBtn(tb3, text="◈ Mark VFX", command=lambda: self._batch_set_vfx(True),
-             bg=BTN, fg=DIM, padx=8, pady=2).pack(side="left")
+             bg=BTN_FACE, padx=8, pady=2).pack(side="left")
         TBtn(tb3, text="◇ Clear VFX", command=lambda: self._batch_set_vfx(False),
-             bg=BTN, fg=DIM, padx=8, pady=2).pack(side="left", padx=(4, 0))
+             bg=BTN_FACE, padx=8, pady=2).pack(side="left", padx=(4, 0))
         TBtn(tb3, text="→ Metadata", command=self._push_vfx_to_metadata,
-             bg=BTN, fg=DIM, padx=8, pady=2).pack(side="left", padx=(12, 0))
+             bg=BTN_FACE, padx=8, pady=2).pack(side="left", padx=(12, 0))
         TBtn(tb3, text="← Metadata", command=self._pull_vfx_from_metadata,
-             bg=BTN, fg=DIM, padx=8, pady=2).pack(side="left", padx=(4, 0))
+             bg=BTN_FACE, padx=8, pady=2).pack(side="left", padx=(4, 0))
 
         TBtn(tb3, text="📊 Shot Change Report", command=self._open_shot_change_report,
-             bg=BTN, fg=DIM, padx=8, pady=2).pack(side="right")
+             bg=BTN_FACE, padx=8, pady=2).pack(side="right")
         TBtn(tb3, text="🔄 Marker Exchange", command=self._open_marker_exchange,
-             bg=BTN, fg=DIM, padx=8, pady=2).pack(side="right", padx=(0, 8))
+             bg=BTN_FACE, padx=8, pady=2).pack(side="right", padx=(0, 8))
 
         # Main area: table + preview
         # Preview must be packed first (side="right") so expand=True on the
@@ -4924,13 +5186,13 @@ class MarkerMadness:
                  anchor="w").pack(fill="x", padx=10, pady=(0, 10))
 
         TBtn(panel, text="⏎  Jump to Marker", command=self._jump_to_marker,
-             bg=ACCENT, fg=BG).pack(fill="x", padx=10, pady=(0, 4))
+             bg=ACCENT).pack(fill="x", padx=10, pady=(0, 4))
         TBtn(panel, text="📷  Grab Frame",    command=self._grab_frame,
-             bg=ACCENT, fg=BG).pack(fill="x", padx=10, pady=(0, 4))
+             bg=ACCENT).pack(fill="x", padx=10, pady=(0, 4))
         TBtn(panel, text="⬇  Export Frame",   command=self._export_frame,
-             bg=GREEN, fg=BG).pack(fill="x", padx=10, pady=(0, 4))
+             bg=GREEN).pack(fill="x", padx=10, pady=(0, 4))
         TBtn(panel, text="📷  Batch Export High Res Frames", command=self._batch_export_full_res_frames,
-             bg=ACCENT, fg=BG).pack(fill="x", padx=10, pady=(0, 6))
+             bg=ACCENT).pack(fill="x", padx=10, pady=(0, 6))
 
         tk.Label(panel, text="Shift or ⌘-click to select\nmultiple markers for batch changes",
                  fg=TEXT, bg=PANEL, font=("Avenir Next", 11, "italic"),
@@ -5061,6 +5323,109 @@ class MarkerMadness:
             self._nudge_auto_var.set(p.get("nudge_skip_confirm", False))
         except Exception:
             pass
+
+    # ── Window sizing ─────────────────────────────────────────────────────
+
+    def _natural_min_size(self):
+        """Smallest window that still shows every control, capped to the screen.
+
+        Width comes from the toolbars: they pack their buttons in a single
+        left-to-right run with no wrapping and no scrollbar, so any control
+        past the right edge is invisible with nothing on screen to hint it
+        exists. The widest row's requested width is therefore the real floor.
+        Height comes from the side panel, which clips at the bottom the same
+        silent way.
+        """
+        scr_w = self.root.winfo_screenwidth()
+        scr_h = self.root.winfo_screenheight()
+
+        rows = getattr(self, "_toolbar_rows", [])
+        widths = []
+        for row in rows:
+            try:
+                widths.append(row.winfo_reqwidth())
+            except Exception:
+                pass
+        # 24 = the 12px padx the rows are packed with, on both sides.
+        content_w = (max(widths) if widths else 0) + 24 + 8
+
+        try:
+            panel_h = self._side_panel.winfo_reqheight()
+        except Exception:
+            panel_h = 0
+
+        w = min(max(content_w, 1100), scr_w - 40)
+        h = min(max(panel_h, 750), scr_h - 100)
+        return int(w), int(h)
+
+    def _init_toolbar_sizing(self):
+        """Snapshot the toolbar layout, set the window floor, start reflowing.
+
+        The snapshot has to happen before anything wraps — pack_info() is the
+        only record of the original single-line layout.
+        """
+        try:
+            self.root.update_idletasks()
+            for row in getattr(self, "_toolbar_rows", []):
+                _flow_snapshot(row)
+            self._apply_min_size()
+            self.root.bind("<Configure>", self._on_root_configure, add="+")
+            self._reflow_toolbars()
+        except Exception:
+            pass
+
+    def _on_root_configure(self, event=None):
+        """Reflow on resize, but only for the window's own Configure events."""
+        if event is not None and event.widget is not self.root:
+            return
+        self._reflow_toolbars()
+
+    def _floor_min_size(self):
+        """The hard minimum — how narrow the window may be dragged.
+
+        With wrapping toolbars this only has to fit the single widest control;
+        anything narrower would clip a button mid-glyph. Kept well below
+        _natural_min_size so laptop displays aren't handed a window wider than
+        their screen.
+        """
+        scr_w = self.root.winfo_screenwidth()
+        scr_h = self.root.winfo_screenheight()
+        widest = 0
+        for row in getattr(self, "_toolbar_rows", []):
+            for item in _flow_snapshot(row):
+                try:
+                    widest = max(widest, item["w"].winfo_reqwidth()
+                                 + item["pad_l"] + item["pad_r"])
+                except Exception:
+                    pass
+        w = min(max(widest + 24, 900), scr_w - 40)
+        h = min(560, scr_h - 100)
+        return int(w), int(h)
+
+    def _apply_min_size(self):
+        """Set the window minimum, and open at the ideal size if there's room."""
+        try:
+            self.root.minsize(*self._floor_min_size())
+        except Exception:
+            pass
+
+    def _reflow_toolbars(self, _event=None):
+        """Re-wrap the toolbar rows to the current window width."""
+        rows = getattr(self, "_toolbar_rows", [])
+        if not rows:
+            return
+        try:
+            avail = self.root.winfo_width() - 24   # the 12px padx on each side
+        except Exception:
+            return
+        if avail <= 1 or avail == getattr(self, "_flow_last_w", None):
+            return
+        self._flow_last_w = avail
+        for row in rows:
+            try:
+                _flow_reflow(row, avail)
+            except Exception:
+                pass
 
     def _reset_layout(self):
         """Restore columns to default order and widths."""
@@ -5392,14 +5757,14 @@ class MarkerMadness:
         for btn, m, label in ((self._btn_mode_tl,   "timeline", "Timeline"),
                               (self._btn_mode_pool, "pool",     "Media Pool")):
             active = (self._mode == m)
-            bg = (POOL_BLUE if m == "pool" else ACCENT) if active else BTN
-            btn.config(bg=bg, fg=BG if active else DIM,
+            bg = (POOL_BLUE if m == "pool" else ACCENT) if active else BTN_FACE_OFF
+            btn.config(bg=bg, fg=_ink_for(bg),
                        text=("◉ " if active else "○ ") + label)
             # TBtn freezes its original bg in the hover bindings — re-bind
             # so the toggled color survives mouse-over
             btn.unbind("<Enter>")
             btn.unbind("<Leave>")
-            btn.bind("<Enter>", lambda _e, b=btn: b.config(bg=BTN_HOV))
+            btn.bind("<Enter>", lambda _e, b=btn, c=bg: b.config(bg=_hover_color(c)))
             btn.bind("<Leave>", lambda _e, b=btn, c=bg: b.config(bg=c))
         color = POOL_BLUE if pool else ACCENT
         self._mode_badge.config(text="◉ MEDIA POOL" if pool else "◉ TIMELINE",
@@ -7955,7 +8320,14 @@ class MarkerMadness:
         """Move selected markers forward or backward by the nudge spinbox value."""
         if self._pool_mode_block("Nudge"):
             return
-        offset = self._nudge_var.get()
+        try:
+            offset = self._nudge_var.get()
+        except tk.TclError:
+            # Field cleared or holding junk — IntVar.get() raises rather than
+            # returning 0.
+            self._mb(messagebox.showinfo, "Nudge",
+                     "Enter a whole number of frames to nudge by.")
+            return
         if offset == 0:
             return
         sel = self._tree.selection()
@@ -8002,7 +8374,12 @@ class MarkerMadness:
                     continue
                 old_mf = rec["marker_frame"]
                 new_mf = old_mf + offset
-                new_mf = max(0, new_mf)
+                if new_mf < 0:
+                    # Skip rather than clamp to 0 — clamping silently piles
+                    # markers onto the head of the clip, which reads as
+                    # markers wandering off on their own.
+                    skipped += 1
+                    continue
                 try:
                     existing = item.GetMarkers() or {}
                 except Exception:
@@ -8070,17 +8447,17 @@ class MarkerMadness:
         n = len(self._main_undo_stack)
         m = len(self._main_redo_stack)
         if n == 0:
-            self._main_undo_btn.config(bg=BTN_HOV, fg=DIM, text="↩ Undo")
+            self._main_undo_btn.config(bg=BTN_FACE_OFF, fg=_ink_for(BTN_FACE_OFF), text="↩ Undo")
         elif n == 1:
-            self._main_undo_btn.config(bg=ACCENT,  fg=BG,  text="↩ Undo")
+            self._main_undo_btn.config(bg=ACCENT,  fg=_ink_for(ACCENT),  text="↩ Undo")
         else:
-            self._main_undo_btn.config(bg=ACCENT,  fg=BG,  text=f"↩ Undo ({n})")
+            self._main_undo_btn.config(bg=ACCENT,  fg=_ink_for(ACCENT),  text=f"↩ Undo ({n})")
         if m == 0:
-            self._main_redo_btn.config(bg=BTN_HOV, fg=DIM, text="↪ Redo")
+            self._main_redo_btn.config(bg=BTN_FACE_OFF, fg=_ink_for(BTN_FACE_OFF), text="↪ Redo")
         elif m == 1:
-            self._main_redo_btn.config(bg=ACCENT,  fg=BG,  text="↪ Redo")
+            self._main_redo_btn.config(bg=ACCENT,  fg=_ink_for(ACCENT),  text="↪ Redo")
         else:
-            self._main_redo_btn.config(bg=ACCENT,  fg=BG,  text=f"↪ Redo ({m})")
+            self._main_redo_btn.config(bg=ACCENT,  fg=_ink_for(ACCENT),  text=f"↪ Redo ({m})")
 
     # ── Main window undo ──────────────────────────────────────────────────
 
@@ -9298,8 +9675,12 @@ def main():
     if not saved_geom:
         root.update_idletasks()
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        w     = min(1560, sw - 60)
-        h     = min(920, sh - 100)   # leave room for menu bar and Dock
+        # Open at least as wide/tall as the controls actually need. A fixed
+        # default used to open narrower than toolbar row 1, hiding the Nudge
+        # controls off the right edge with nothing on screen to hint at them.
+        min_w, min_h = app._natural_min_size()
+        w     = min(max(1560, min_w), sw - 60)
+        h     = min(max(920, min_h), sh - 100)   # room for menu bar and Dock
         px    = root.winfo_pointerx()
         py    = root.winfo_pointery()
         x     = min(max(0, px - w // 2), max(0, sw - w))
@@ -9307,26 +9688,45 @@ def main():
         root.geometry(f"{w}x{h}+{x}+{y}")
 
     def _grow_to_fit():
-        # The side panel has pack_propagate(False), so its reqheight
-        # ignores its children — measure the real content height as the
-        # bottom edge of its lowest child instead. If content is clipped,
-        # grow the window by the shortfall (screen permitting) and
-        # re-anchor so the bottom edge stays on screen.
+        # Grow-only pass on BOTH axes. Either one can clip silently: toolbar
+        # controls run off the right edge (no wrap, no scrollbar) and the side
+        # panel gets cut at the bottom. Measure what the content actually
+        # needs, expand into it, and re-anchor so the window stays on screen.
         try:
+            scr_w = root.winfo_screenwidth()
+            scr_h = root.winfo_screenheight()
+
+            # The floor is what the window may be dragged down to (wrapping
+            # copes below the ideal); the ideal is what we grow toward when
+            # the display has room for it.
+            root.minsize(*app._floor_min_size())
+            need_w, need_h = app._natural_min_size()
+            root.update_idletasks()
+
+            cur_w, cur_h = root.winfo_width(), root.winfo_height()
+            new_w = max(cur_w, need_w)
+            new_h = max(cur_h, need_h)
+
+            # The side panel has pack_propagate(False), so its reqheight
+            # ignores its children — measure the real content height as the
+            # bottom edge of its lowest child instead.
             panel = app._side_panel
             kids  = panel.winfo_children()
-            if not kids:
+            if kids:
+                needed = max(k.winfo_y() + k.winfo_reqheight()
+                             for k in kids) + 20   # breathing room
+                short = needed - panel.winfo_height()
+                if short > 0:
+                    new_h = max(new_h, cur_h + short)
+
+            new_w = min(new_w, scr_w - 40)
+            new_h = min(new_h, scr_h - 60)
+            if new_w == cur_w and new_h == cur_h:
                 return
-            needed = max(k.winfo_y() + k.winfo_reqheight()
-                         for k in kids) + 20   # breathing room
-            short = needed - panel.winfo_height()
-            if short <= 0:
-                return
-            scr_h = root.winfo_screenheight()
-            new_h = min(root.winfo_height() + short, scr_h - 60)
+
+            new_x = max(0, min(root.winfo_x(), scr_w - new_w))
             new_y = max(25, min(root.winfo_y(), scr_h - new_h - 35))
-            root.geometry(f"{root.winfo_width()}x{new_h}"
-                          f"+{root.winfo_x()}+{new_y}")
+            root.geometry(f"{new_w}x{new_h}+{new_x}+{new_y}")
         except Exception:
             pass
 

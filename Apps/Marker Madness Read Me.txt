@@ -1,4 +1,4 @@
-Marker Madness v1.6
+Marker Madness v1.7
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -9,6 +9,29 @@ Add, edit, search, filter, color-code, and bulk-edit markers from a
 single panel. Export to HTML or CSV, detect shot changes between two
 exports, sync VFX shot data with clip metadata, and exchange markers
 bidirectionally with Premiere Pro and Avid Media Composer.
+
+WHAT'S NEW IN 1.7
+- Buttons are legible again. Neutral buttons used mid-grey text on a
+  near-panel grey, so the button shape was invisible and the label
+  looked permanently disabled — the Undo/Redo pair measured 1.6:1
+  against their own face. Every button now takes a light face with
+  near-black text, and the text colour is derived from the face
+  instead of hand-picked, so a new button colour can't bring the
+  problem back. All button states now clear 4.5:1.
+- New "Continue from highest" in Batch Rename — scans every marker in
+  the timeline, finds the largest number already in use, and sets
+  Start to one step past it. For slotting a new run of shots in after
+  an existing 010/020/030 without renumbering from the top.
+- The counter example under Step is now live. It used to be a fixed
+  string promising 010, 020, 030 while Digits shipped at 2, which
+  actually produces 40, 50, 60. It now reads the real fields and
+  updates as you type.
+- Digits now defaults to 3, so 010 / 020 / 030 is the resting state.
+- Toolbar rows that don't fit the window now wrap onto extra lines.
+  Previously controls past the right edge were simply unreachable —
+  no scrollbar, nothing on screen to suggest they existed.
+- Fixed: clearing the Counter's Start field to type a new number no
+  longer breaks the preview or the Apply.
 
 WHAT'S NEW IN 1.6
 - New Version suffix in Batch Rename — tick "Version" to append a
@@ -88,7 +111,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Marker Madness 1.6.py" to:
+1. Copy "Marker Madness 1.7.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -98,7 +121,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Marker Madness 1.6
+   Workspace → Scripts → Utility → Marker Madness 1.7
 
 FULL DOCUMENTATION
    resolve-tools.com/marker-madness-guide
