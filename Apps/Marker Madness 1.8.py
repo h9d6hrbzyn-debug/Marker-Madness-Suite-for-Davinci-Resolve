@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Marker Madness 1.7 — DaVinci Resolve Marker Manager
+Marker Madness 1.8 — DaVinci Resolve Marker Manager
 ===================================================
 A GUI tool to view, add, edit, delete, and export both timeline markers
 and clip-based markers in your current DaVinci Resolve timeline.
@@ -390,27 +390,28 @@ BTN_INK_LIGHT = "#F5F5F5"
 
 
 def _ink_for(face):
-    """Pick whichever ink reads better on this face.
+    """Ink for a button label — always the dark ink. See why.
 
-    Hand-picked foregrounds are how buttons drift out of legibility: the suite
-    had near-black on dark grey in one place and near-white on a pastel in
-    another. Deriving the ink from the face means a new button colour cannot
-    reintroduce the bug.
+    This used to measure `face` and return whichever ink contrasted better
+    against it. That is the right rule for a surface we actually paint, and the
+    wrong one for a tk.Button on macOS: Aqua ignores a button's bg outright and
+    draws its own bezel — bright while the window is active, grey once it is
+    not. The colour we ask for is never the colour the label sits on. Setting
+    bd=0 / highlightthickness=0 does not change it either: Clipper sets both,
+    asks for a #505050 face on all fifteen of its buttons, and still renders
+    light.
+
+    So on a dark declared face the old logic returned near-white ink, which
+    landed on Aqua's bright bezel — invisible while the window was focused,
+    readable again the moment you clicked away. Exactly the reported bug.
+
+    The ink has to read against what Aqua actually draws, and that is light in
+    both states. Hence: always dark. Clipper and Track Command have hardcoded
+    dark ink from the start and have never shown the problem — the control
+    group. `face` stays in the signature so the call sites, which do still set
+    meaningful bg values, need no changes.
     """
-    def _lum(h):
-        ch = [int(h.lstrip("#")[i:i + 2], 16) / 255 for i in (0, 2, 4)]
-        ch = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
-              for c in ch]
-        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
-
-    def _contrast(a, b):
-        la, lb = _lum(a), _lum(b)
-        hi, lo = max(la, lb), min(la, lb)
-        return (hi + 0.05) / (lo + 0.05)
-
-    return (BTN_INK_DARK
-            if _contrast(BTN_INK_DARK, face) >= _contrast(BTN_INK_LIGHT, face)
-            else BTN_INK_LIGHT)
+    return BTN_INK_DARK
 
 def _hover_color(hex_color, factor=0.18):
     """Lift a face toward white so hover works on any button colour."""
@@ -1906,6 +1907,54 @@ class AddActionDialog(tk.Toplevel):
 # Stamp Track dialog  (marker settings + track selector for bulk stamping)
 # ---------------------------------------------------------------------------
 
+def attach_combo_typeahead(combo, values, numeric_prefixes=()):
+    """Let a readonly ttk.Combobox be driven from the keyboard.
+
+    macOS Tk swallows letter keys on a readonly combobox, so typing the name
+    of the entry you want does nothing at all. This restores what people
+    expect: type "le" and land on Lemon. The buffer clears after a short
+    pause so the next burst starts fresh.
+
+    numeric_prefixes makes a bare number work for prefixed lists — on the
+    track picker, typing 4 jumps to V4, or A4 if there is no V4.
+    """
+    state = {"buf": "", "job": None}
+
+    def _reset():
+        state["buf"] = ""
+        state["job"] = None
+
+    def _on_key(event):
+        ch = event.char
+        # Tab / Return / Escape / arrows report a non-printable char or none
+        # at all — let those through so traversal still works.
+        if not ch or not ch.isprintable():
+            return None
+        if ch == " " and not state["buf"]:
+            return None          # bare space keeps its usual job
+        if state["job"] is not None:
+            try:
+                combo.after_cancel(state["job"])
+            except Exception:
+                pass
+        state["buf"] += ch.lower()
+        state["job"] = combo.after(900, _reset)
+
+        buf   = state["buf"]
+        match = [v for v in values if v.lower().startswith(buf)]
+        if not match and buf.isdigit():
+            for pfx in numeric_prefixes:
+                match = [v for v in values if v.lower() == (pfx + buf).lower()]
+                if match:
+                    break
+        if match:
+            combo.set(match[0])
+        return "break"
+
+    combo.bind("<KeyPress>", _on_key)
+    combo._typeahead = _on_key   # exposed so the behaviour can be tested
+
+
 class StampTrackDialog(tk.Toplevel):
     """Configure a marker to be stamped on every clip in a chosen track.
 
@@ -1913,8 +1962,10 @@ class StampTrackDialog(tk.Toplevel):
     timeline   : live Resolve timeline proxy (used by ↺ From Timeline button)
     fps        : project frame rate
     result     : (ttype, tidx, color, name, note, duration, offset,
-                  skip_existing, range_frames)
+                  skip_existing, range_frames, counter_cfg)
                  range_frames is None (entire track) or (in_frames, out_frames).
+                 counter_cfg is None (no numbering) or a dict with
+                 digits / start / step / pos.
                  Entire tuple is None on cancel.
     """
 
@@ -1937,6 +1988,13 @@ class StampTrackDialog(tk.Toplevel):
         tk.Label(self, text="Places one marker on every clip in the chosen track.",
                  fg=DIM, bg=BG, font=F_SMALL).pack(padx=28, pady=(0, 14))
 
+        # Tk draws no visible focus ring on macOS radio/check buttons, so
+        # tabbing through this dialog gave no clue which control was live.
+        # highlightbackground matches BG (invisible at rest); highlightcolor
+        # lights up in the accent when the widget takes focus.
+        FOCUS = dict(highlightthickness=2, highlightbackground=BG,
+                     highlightcolor=ACCENT)
+
         # ── Build track selector data ─────────────────────────────────────
         self._track_labels = []
         self._track_data   = []
@@ -1955,19 +2013,23 @@ class StampTrackDialog(tk.Toplevel):
                  font=F_MAIN).grid(row=0, column=0, sticky="w", pady=5)
         self._track_var = tk.StringVar(
             value=self._track_labels[0] if self._track_labels else "")
-        ttk.Combobox(grid, textvariable=self._track_var,
-                     values=self._track_labels, state="readonly",
-                     width=10, font=F_MAIN).grid(
-                         row=0, column=1, sticky="w", padx=(10, 0), pady=5)
+        track_cb = ttk.Combobox(grid, textvariable=self._track_var,
+                                values=self._track_labels, state="readonly",
+                                width=10, font=F_MAIN)
+        track_cb.grid(row=0, column=1, sticky="w", padx=(10, 0), pady=5)
+        # Bare digits jump to the video track first, then audio: 4 -> V4.
+        attach_combo_typeahead(track_cb, self._track_labels,
+                               numeric_prefixes=("V", "A"))
 
         # Color
         tk.Label(grid, text="Color:", fg=TEXT, bg=BG,
                  font=F_MAIN).grid(row=1, column=0, sticky="w", pady=5)
         self._color_var = tk.StringVar(value="Blue")
-        ttk.Combobox(grid, textvariable=self._color_var,
-                     values=MARKER_COLORS, state="readonly",
-                     width=14, font=F_MAIN).grid(
-                         row=1, column=1, sticky="w", padx=(10, 0), pady=5)
+        color_cb = ttk.Combobox(grid, textvariable=self._color_var,
+                                values=MARKER_COLORS, state="readonly",
+                                width=14, font=F_MAIN)
+        color_cb.grid(row=1, column=1, sticky="w", padx=(10, 0), pady=5)
+        attach_combo_typeahead(color_cb, MARKER_COLORS)
 
         # Name
         tk.Label(grid, text="Name:", fg=TEXT, bg=BG,
@@ -1978,20 +2040,90 @@ class StampTrackDialog(tk.Toplevel):
                  width=32).grid(row=2, column=1, sticky="ew",
                                 padx=(10, 0), pady=5)
 
+        # Counter — numbers each marker as it is stamped. Same engine as the
+        # Marker Renamer (_renamer_transform), so the numbering behaves
+        # identically whether you stamp it now or batch-rename it later.
+        tk.Label(grid, text="Counter:", fg=TEXT, bg=BG,
+                 font=F_MAIN).grid(row=3, column=0, sticky="nw", pady=5)
+        ctr_wrap = tk.Frame(grid, bg=BG)
+        ctr_wrap.grid(row=3, column=1, sticky="w", padx=(10, 0), pady=5)
+
+        ctr_row = tk.Frame(ctr_wrap, bg=BG)
+        ctr_row.pack(anchor="w")
+
+        self._ctr_var        = tk.BooleanVar(value=False)
+        self._ctr_digits_var = tk.IntVar(value=3)
+        self._ctr_start_var  = tk.IntVar(value=1)
+        self._ctr_step_var   = tk.IntVar(value=1)
+        self._ctr_pos_var    = tk.StringVar(value="After")
+
+        tk.Checkbutton(ctr_row, text="Number each marker",
+                       variable=self._ctr_var,
+                       command=self._on_counter_toggle,
+                       fg=TEXT, bg=BG, activeforeground=TEXT,
+                       activebackground=BG, selectcolor=ENTRY_BG,
+                       font=F_MAIN, **FOCUS).pack(side="left", padx=(0, 10))
+
+        self._ctr_widgets = []
+
+        def _ctr_spin(label, var, lo, hi, width=4):
+            tk.Label(ctr_row, text=label, fg=DIM, bg=BG,
+                     font=F_SMALL).pack(side="left", padx=(4, 2))
+            sb = tk.Spinbox(ctr_row, from_=lo, to=hi, textvariable=var,
+                            width=width, bg=ENTRY_BG, fg=TEXT,
+                            insertbackground=TEXT, buttonbackground=BTN,
+                            relief="flat", font=F_MAIN,
+                            command=self._update_ctr_hint)
+            sb.pack(side="left")
+            var.trace_add("write", lambda *_: self._update_ctr_hint())
+            self._ctr_widgets.append(sb)
+
+        _ctr_spin("Digits:", self._ctr_digits_var, 1, 6)
+        _ctr_spin("Start:",  self._ctr_start_var,  0, 9999, width=5)
+        _ctr_spin("Step:",   self._ctr_step_var,   1, 9999, width=4)
+
+        tk.Label(ctr_row, text="Pos:", fg=DIM, bg=BG,
+                 font=F_SMALL).pack(side="left", padx=(6, 2))
+        self._ctr_pos_cb = ttk.Combobox(ctr_row, textvariable=self._ctr_pos_var,
+                                        values=["After", "Before"],
+                                        state="readonly", width=7, font=F_SMALL)
+        self._ctr_pos_cb.pack(side="left")
+        attach_combo_typeahead(self._ctr_pos_cb, ["After", "Before"])
+        self._ctr_widgets.append(self._ctr_pos_cb)
+        self._ctr_pos_var.trace_add("write", lambda *_: self._update_ctr_hint())
+
+        # Live readout of the first three names — a static example would
+        # drift out of step with the fields sitting right next to it. Set in
+        # the accent rather than dim italics: this is the line you actually
+        # read before committing, so it should not look like fine print.
+        hint_row = tk.Frame(ctr_wrap, bg=BG)
+        hint_row.pack(anchor="w", pady=(7, 1))
+        self._ctr_hint_lbl = tk.Label(hint_row, text="", fg=DIM, bg=BG,
+                                      font=F_SMALL)
+        self._ctr_hint_lbl.pack(side="left", padx=(0, 8))
+        # Not bold, and wrapped: a long plate name in bold ran the label
+        # past the edge of the window. wraplength keeps it inside the dialog
+        # and lets it spill onto a second line instead of off the screen.
+        self._ctr_hint = tk.Label(hint_row, text="", fg=ACCENT, bg=BG,
+                                  font=("Avenir Next", 12),
+                                  wraplength=430, justify="left")
+        self._ctr_hint.pack(side="left")
+        self._name_var.trace_add("write", lambda *_: self._update_ctr_hint())
+
         # Note
         tk.Label(grid, text="Note:", fg=TEXT, bg=BG,
-                 font=F_MAIN).grid(row=3, column=0, sticky="w", pady=5)
+                 font=F_MAIN).grid(row=4, column=0, sticky="w", pady=5)
         self._note_var = tk.StringVar()
         tk.Entry(grid, textvariable=self._note_var, bg=ENTRY_BG, fg=TEXT,
                  insertbackground=TEXT, relief="flat", font=F_MAIN,
-                 width=32).grid(row=3, column=1, sticky="ew",
+                 width=32).grid(row=4, column=1, sticky="ew",
                                 padx=(10, 0), pady=5)
 
         # Duration
         tk.Label(grid, text="Duration:", fg=TEXT, bg=BG,
-                 font=F_MAIN).grid(row=4, column=0, sticky="w", pady=5)
+                 font=F_MAIN).grid(row=5, column=0, sticky="w", pady=5)
         dur_row = tk.Frame(grid, bg=BG)
-        dur_row.grid(row=4, column=1, sticky="w", padx=(10, 0), pady=5)
+        dur_row.grid(row=5, column=1, sticky="w", padx=(10, 0), pady=5)
         self._dur_var = tk.IntVar(value=1)
         tk.Spinbox(dur_row, from_=1, to=9999, textvariable=self._dur_var,
                    width=7, bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT,
@@ -2002,15 +2134,15 @@ class StampTrackDialog(tk.Toplevel):
 
         # Position within clip
         tk.Label(grid, text="Position:", fg=TEXT, bg=BG,
-                 font=F_MAIN).grid(row=5, column=0, sticky="nw", pady=(10, 5))
+                 font=F_MAIN).grid(row=6, column=0, sticky="nw", pady=(10, 5))
         pos_frame = tk.Frame(grid, bg=BG)
-        pos_frame.grid(row=5, column=1, sticky="w", padx=(10, 0), pady=(10, 5))
+        pos_frame.grid(row=6, column=1, sticky="w", padx=(10, 0), pady=(10, 5))
         self._pos_var = tk.StringVar(value="start")
         tk.Radiobutton(pos_frame, text="Start of clip",
                        variable=self._pos_var, value="start",
                        fg=TEXT, bg=BG, activeforeground=TEXT,
                        activebackground=BG, selectcolor=ENTRY_BG,
-                       font=F_MAIN,
+                       font=F_MAIN, **FOCUS,
                        command=self._update_offset_state).pack(anchor="w")
         offset_row = tk.Frame(pos_frame, bg=BG)
         offset_row.pack(anchor="w", pady=(4, 0))
@@ -2018,7 +2150,7 @@ class StampTrackDialog(tk.Toplevel):
                        variable=self._pos_var, value="offset",
                        fg=TEXT, bg=BG, activeforeground=TEXT,
                        activebackground=BG, selectcolor=ENTRY_BG,
-                       font=F_MAIN,
+                       font=F_MAIN, **FOCUS,
                        command=self._update_offset_state).pack(side="left")
         self._offset_var = tk.IntVar(value=0)
         self._offset_sb  = tk.Spinbox(offset_row, from_=0, to=99999,
@@ -2033,33 +2165,33 @@ class StampTrackDialog(tk.Toplevel):
 
         # Conflicts
         tk.Label(grid, text="Conflicts:", fg=TEXT, bg=BG,
-                 font=F_MAIN).grid(row=6, column=0, sticky="nw", pady=(10, 5))
+                 font=F_MAIN).grid(row=7, column=0, sticky="nw", pady=(10, 5))
         cf_frame = tk.Frame(grid, bg=BG)
-        cf_frame.grid(row=6, column=1, sticky="w", padx=(10, 0), pady=(10, 5))
+        cf_frame.grid(row=7, column=1, sticky="w", padx=(10, 0), pady=(10, 5))
         self._skip_var = tk.StringVar(value="skip")
         tk.Radiobutton(cf_frame,
                        text="Skip clips that already have a marker at that position",
                        variable=self._skip_var, value="skip",
                        fg=TEXT, bg=BG, activeforeground=TEXT,
                        activebackground=BG, selectcolor=ENTRY_BG,
-                       font=F_MAIN, wraplength=300,
+                       font=F_MAIN, wraplength=300, **FOCUS,
                        justify="left").pack(anchor="w")
         tk.Radiobutton(cf_frame, text="Overwrite existing",
                        variable=self._skip_var, value="overwrite",
                        fg=TEXT, bg=BG, activeforeground=TEXT,
                        activebackground=BG, selectcolor=ENTRY_BG,
-                       font=F_MAIN).pack(anchor="w", pady=(4, 0))
+                       font=F_MAIN, **FOCUS).pack(anchor="w", pady=(4, 0))
 
         # ── Range ─────────────────────────────────────────────────────────
         tk.Label(grid, text="Range:", fg=TEXT, bg=BG,
-                 font=F_MAIN).grid(row=7, column=0, sticky="nw", pady=(10, 5))
+                 font=F_MAIN).grid(row=8, column=0, sticky="nw", pady=(10, 5))
         rng_frame = tk.Frame(grid, bg=BG)
-        rng_frame.grid(row=7, column=1, sticky="w", padx=(10, 0), pady=(10, 5))
+        rng_frame.grid(row=8, column=1, sticky="w", padx=(10, 0), pady=(10, 5))
 
         self._range_var = tk.StringVar(value="all")
         rb_kw = dict(fg=TEXT, bg=BG, activeforeground=TEXT,
                      activebackground=BG, selectcolor=ENTRY_BG,
-                     font=F_MAIN, command=self._on_range_changed)
+                     font=F_MAIN, command=self._on_range_changed, **FOCUS)
         tk.Radiobutton(rng_frame, text="Entire track",
                        variable=self._range_var, value="all",
                        **rb_kw).pack(side="left")
@@ -2071,7 +2203,7 @@ class StampTrackDialog(tk.Toplevel):
         self._range_in_var  = tk.StringVar(value="")
         self._range_out_var = tk.StringVar(value="")
         self._tc_frame = tk.Frame(grid, bg=BG)
-        self._tc_frame.grid(row=8, column=1, sticky="w", padx=(10, 0), pady=(0, 6))
+        self._tc_frame.grid(row=9, column=1, sticky="w", padx=(10, 0), pady=(0, 6))
         self._tc_frame.grid_remove()
 
         tc_kw = dict(bg=ENTRY_BG, fg=TEXT, insertbackground=TEXT,
@@ -2096,6 +2228,8 @@ class StampTrackDialog(tk.Toplevel):
         TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT).pack(side="left", padx=8)
 
         self._update_offset_state()
+        self._on_counter_toggle()
+        self._wire_focus_marks(self)
         self.bind("<Return>",   lambda _: self._ok())
         self.bind("<KP_Enter>", lambda _: self._ok())
         self.bind("<Escape>",   lambda _: self.destroy())
@@ -2105,9 +2239,58 @@ class StampTrackDialog(tk.Toplevel):
         self.attributes("-topmost", True)
         self.focus_force()
 
+    def _wire_focus_marks(self, parent):
+        """Make keyboard focus visible on radio and check buttons.
+
+        highlightthickness draws nothing on macOS Aqua for these widgets, so
+        tabbing gave no clue where you were. Recolouring does work: the
+        focused control switches to accent text on the lighter panel shade.
+        """
+        for w in parent.winfo_children():
+            if w.winfo_class() in ("Radiobutton", "Checkbutton"):
+                w.bind("<FocusIn>",
+                       lambda e: e.widget.config(fg=ACCENT, bg=PANEL,
+                                                 activebackground=PANEL))
+                w.bind("<FocusOut>",
+                       lambda e: e.widget.config(fg=TEXT, bg=BG,
+                                                 activebackground=BG))
+            self._wire_focus_marks(w)
+
     def _update_offset_state(self):
         state = "normal" if self._pos_var.get() == "offset" else "disabled"
         self._offset_sb.config(state=state)
+
+    def _on_counter_toggle(self):
+        """Grey the counter fields when numbering is off."""
+        on = self._ctr_var.get()
+        for w in self._ctr_widgets:
+            try:
+                w.config(state=("readonly" if w is self._ctr_pos_cb else "normal")
+                                if on else "disabled")
+            except Exception:
+                pass
+        self._update_ctr_hint()
+
+    def _update_ctr_hint(self):
+        """Show the first three names the current settings would produce."""
+        if not self._ctr_var.get():
+            self._ctr_hint.config(text="")
+            self._ctr_hint_lbl.config(text="")
+            return
+        self._ctr_hint_lbl.config(text="First three:")
+        try:
+            digits = max(1, int(self._ctr_digits_var.get()))
+            start  = max(0, int(self._ctr_start_var.get()))
+            step   = max(1, int(self._ctr_step_var.get()))
+        except (ValueError, tk.TclError):
+            self._ctr_hint.config(text="check Digits / Start / Step")
+            return
+        base = self._name_var.get().strip()
+        pos  = self._ctr_pos_var.get()
+        names = [_renamer_transform(base, counter=start + i * step,
+                                    counter_enabled=True, counter_digits=digits,
+                                    counter_pos=pos) for i in range(3)]
+        self._ctr_hint.config(text=",   ".join(n for n in names if n))
 
     def _on_range_changed(self):
         if self._range_var.get() == "inout":
@@ -2267,12 +2450,29 @@ class StampTrackDialog(tk.Toplevel):
                     "Stamping will apply to the entire track instead.",
                     parent=self)
 
+        counter_cfg = None
+        if self._ctr_var.get():
+            try:
+                counter_cfg = {
+                    "digits": max(1, int(self._ctr_digits_var.get())),
+                    "start":  max(0, int(self._ctr_start_var.get())),
+                    "step":   max(1, int(self._ctr_step_var.get())),
+                    "pos":    self._ctr_pos_var.get(),
+                }
+            except (ValueError, tk.TclError):
+                messagebox.showwarning(
+                    "Counter Fields",
+                    "Digits, Start, or Step is mid-edit or not a number.\n"
+                    "Stamping will go ahead without numbering.",
+                    parent=self)
+                counter_cfg = None
+
         self.result = (
             ttype, tidx,
             self._color_var.get(),
             self._name_var.get().strip(),
             self._note_var.get().strip(),
-            dur, offset, skip, range_frames,
+            dur, offset, skip, range_frames, counter_cfg,
         )
         self.destroy()
 
@@ -4577,7 +4777,7 @@ def _flow_reflow(row, avail_w):
 # ---------------------------------------------------------------------------
 
 APP_TITLE   = "Marker Madness"
-APP_VERSION = "1.7"
+APP_VERSION = "1.8"
 
 class MarkerMadness:
     def __init__(self, root: tk.Tk):
@@ -5342,8 +5542,26 @@ class MarkerMadness:
         rows = getattr(self, "_toolbar_rows", [])
         widths = []
         for row in rows:
+            # Measure the row UNWRAPPED, from its layout snapshot.
+            #
+            # This used to read row.winfo_reqwidth() live, which is wrap-
+            # dependent: once _reflow_toolbars has wrapped a row to a narrow
+            # window its reqwidth collapses (to 1), so this function reported
+            # the 1100 floor instead of the real 1780. _grow_to_fit then
+            # compared that against the current width, concluded the window
+            # was already big enough, and never grew back — leaving the right
+            # end of the toolbars (Nudge, Apply, Skip Confirm) off screen with
+            # nothing on screen to hint they existed. The window then saved
+            # the clipped width on exit, so it came back clipped next launch.
+            #
+            # The snapshot records the original single-line layout, so it is
+            # the same measurement whether the row is currently wrapped or not.
             try:
-                widths.append(row.winfo_reqwidth())
+                total = 0
+                for item in _flow_snapshot(row):
+                    total += (item["w"].winfo_reqwidth()
+                              + item["pad_l"] + item["pad_r"])
+                widths.append(total or row.winfo_reqwidth())
             except Exception:
                 pass
         # 24 = the 12px padx the rows are packed with, on both sides.
@@ -7585,10 +7803,13 @@ class MarkerMadness:
         """Stamp a marker on every clip in the chosen track.
 
         params : (ttype, tidx, color, name, note, duration, offset,
-                  skip_existing, range_frames)
+                  skip_existing, range_frames, counter_cfg)
         range_frames is None (entire track) or (in_frames, out_frames).
+        counter_cfg is None, or a dict of digits / start / step / pos — the
+        marker name then gets a running number, same as the Marker Renamer.
         """
-        ttype, tidx, color, name, note, duration, offset, skip_existing, range_frames = params
+        (ttype, tidx, color, name, note, duration, offset,
+         skip_existing, range_frames, counter_cfg) = params
         try:
             items = timeline.GetItemListInTrack(ttype, tidx) or []
         except Exception:
@@ -7654,6 +7875,8 @@ class MarkerMadness:
             # without any false positives.
 
         added = 0; skipped = 0; out_of_range = 0; failed = 0
+        ctr        = counter_cfg["start"] if counter_cfg else 0
+        used_names = []   # names actually stamped, for the summary
         transitions_skipped = len(transition_indices)
         first_err = None
 
@@ -7714,11 +7937,21 @@ class MarkerMadness:
             else:
                 _diag = None
 
+            # ── Marker name, numbered if the counter is on ───────────────
+            if counter_cfg:
+                marker_name = _renamer_transform(
+                    name, counter=ctr, counter_enabled=True,
+                    counter_digits=counter_cfg["digits"],
+                    counter_pos=counter_cfg["pos"],
+                )
+            else:
+                marker_name = name
+
             # ── Try clip_offset, then bare offset, then frame 0 ──────────
             ok = False; err = "all attempts failed"
             for _fid in [clip_offset, offset, 0]:
                 ok, err = self._resolve_add_marker(
-                    item, _fid, color, name, note, duration, ""
+                    item, _fid, color, marker_name, note, duration, ""
                 )
                 if ok:
                     break
@@ -7726,6 +7959,11 @@ class MarkerMadness:
 
             if ok:
                 added += 1
+                # Advance only on success — a skipped or failed clip must not
+                # burn a number, or the stamped sequence comes out gappy.
+                if counter_cfg:
+                    used_names.append(marker_name)
+                    ctr += counter_cfg["step"]
             else:
                 failed += 1
                 if first_err is None:
@@ -7739,6 +7977,11 @@ class MarkerMadness:
         trans_line = ""
         if transitions_skipped:
             trans_line = f"Transitions skipped:   {transitions_skipped}\n"
+        ctr_line = ""
+        if counter_cfg and used_names:
+            ctr_line = (f"Numbered:              {used_names[0]} … {used_names[-1]}\n"
+                        if len(used_names) > 1 else
+                        f"Numbered:              {used_names[0]}\n")
         diag_line = ""
         if failed and first_err:
             diag_line = f"\n\nFirst failure reason:\n{first_err}"
@@ -7746,6 +7989,7 @@ class MarkerMadness:
             f"Stamp complete  →  Track {prefix}{tidx}\n\n"
             f"Clips processed:       {total}\n"
             f"Markers added:         {added}\n"
+            f"{ctr_line}"
             f"{range_line}"
             f"{trans_line}"
             f"Skipped (conflict):    {skipped}\n"

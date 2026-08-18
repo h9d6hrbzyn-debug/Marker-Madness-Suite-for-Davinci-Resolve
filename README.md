@@ -12,7 +12,7 @@ Five free scripting tools for DaVinci Resolve editors. No subscriptions, no nons
 
 ---
 
-### <img src="https://resolve-tools.com/images/icons/icon-marker-madness.png" width="28" style="vertical-align:middle;"> Marker Madness v1.7
+### <img src="https://resolve-tools.com/images/icons/icon-marker-madness.png" width="28" style="vertical-align:middle;"> Marker Madness v1.8
 *Because your markers deserve better than chaos.*
 
 You dropped a hundred markers across a timeline. Some are on clips, some are on the ruler, some are named, some aren't. You need to find the red ones, rename them all, nudge them two frames earlier, export a CSV with thumbnail frames, and do it before lunch.
@@ -55,7 +55,7 @@ Marker Madness puts every marker in your timeline — clip markers and timeline 
 
 ---
 
-### <img src="https://resolve-tools.com/images/icons/icon-clip-renamer-pro.png" width="28" style="vertical-align:middle;"> Clip Renamer Pro v2.2
+### <img src="https://resolve-tools.com/images/icons/icon-clip-renamer-pro.png" width="28" style="vertical-align:middle;"> Clip Renamer Pro v2.2.1
 *Batch rename without the batch headache.*
 
 You've got 200 clips in a bin that all came off camera named something like `A001C002_240318_R3D2`. You need them to say something a human can read. Or you've got a mix of cases and want everything sentence-case. Or you're adding a project code prefix to every clip before you hand off the drive.

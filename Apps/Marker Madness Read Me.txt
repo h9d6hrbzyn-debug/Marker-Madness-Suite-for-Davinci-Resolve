@@ -1,4 +1,4 @@
-Marker Madness v1.7
+Marker Madness v1.8
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -9,6 +9,26 @@ Add, edit, search, filter, color-code, and bulk-edit markers from a
 single panel. Export to HTML or CSV, detect shot changes between two
 exports, sync VFX shot data with clip metadata, and exchange markers
 bidirectionally with Premiere Pro and Avid Media Composer.
+
+WHAT'S NEW IN 1.8
+- Batch Stamp can number as it stamps. Tick "Number each marker",
+  set Digits / Start / Step and whether the number goes before or
+  after the name, and you get VFX_001, VFX_002 … as the markers are
+  created. No more stamping first and batch-renaming afterwards. It
+  runs the same numbering engine as Batch Rename, so the results are
+  identical either way, and the number only advances on a marker that
+  actually lands — skipped clips and transitions don't leave gaps.
+- The Stamp dialog is keyboard-driveable. Type a number on the Track
+  dropdown to jump to that track (4 goes to V4), or the first letters
+  of a colour to jump to it (le → Lemon). Radio buttons and check
+  boxes now show which one has focus, so tabbing through is followable.
+- The window opens wide enough to show the Nudge controls. It had been
+  measuring its own toolbars after they'd wrapped, reading a width far
+  smaller than the controls need, and concluding it was already big
+  enough — then saving that too-narrow size on exit, so it came back
+  clipped every launch. Nudge, Apply and Skip Confirm were off the
+  right edge with nothing on screen to suggest they existed.
+- Button labels stay readable while the window is focused.
 
 WHAT'S NEW IN 1.7
 - Buttons are legible again. Neutral buttons used mid-grey text on a
@@ -111,7 +131,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Marker Madness 1.7.py" to:
+1. Copy "Marker Madness 1.8.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -121,7 +141,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Marker Madness 1.7
+   Workspace → Scripts → Utility → Marker Madness 1.8
 
 FULL DOCUMENTATION
    resolve-tools.com/marker-madness-guide

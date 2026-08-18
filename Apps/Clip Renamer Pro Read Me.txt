@@ -1,4 +1,4 @@
-Clip Renamer Pro v2.2
+Clip Renamer Pro v2.2.1
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -7,6 +7,18 @@ WHAT IT DOES
 Clip Renamer Pro renames clips in your DaVinci Resolve Media Pool in
 bulk. Build a custom name from tokens — scene, take, camera, description,
 and more — preview the result before committing, and apply in one click.
+
+WHAT'S NEW IN 2.2.1
+- Fixed: button labels were invisible while the window was focused.
+  2.2 started deriving each label's colour from the button's face,
+  which is the right rule for a surface we paint ourselves and the
+  wrong one here — macOS ignores a button's background entirely and
+  draws its own, bright while the window is active and grey once it
+  isn't. Dark faces therefore got near-white labels, which vanished
+  against that bright background exactly when you were trying to use
+  the window, and reappeared the moment you clicked away. Labels are
+  near-black again, matching Clipper and Track Command, which never
+  had the problem.
 
 WHAT'S NEW IN 2.2
 - Buttons are legible again, matching Marker Madness 1.7. The text
@@ -47,7 +59,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Clip Renamer Pro 2.2.py" to:
+1. Copy "Clip Renamer Pro 2.2.1.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -57,7 +69,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Clip Renamer Pro 2.2
+   Workspace → Scripts → Utility → Clip Renamer Pro 2.2.1
 
 FULL DOCUMENTATION
    resolve-tools.com/clip-renamer-pro-guide

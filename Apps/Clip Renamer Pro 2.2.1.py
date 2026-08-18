@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clip Renamer Pro 2.2 — DaVinci Resolve Clip & Timeline Renamer
+Clip Renamer Pro 2.2.1 — DaVinci Resolve Clip & Timeline Renamer
 
 Renames clips and/or timelines selected in the Resolve Media Pool bin.
 Part of the Marker Madness suite.
@@ -277,21 +277,28 @@ BTN_INK_LIGHT = "#F5F5F5"
 
 
 def _ink_for(face):
-    """Pick whichever ink reads better on this face (see Marker Madness)."""
-    def _lum(h):
-        ch = [int(h.lstrip("#")[i:i + 2], 16) / 255 for i in (0, 2, 4)]
-        ch = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
-              for c in ch]
-        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+    """Ink for a button label — always the dark ink. See why.
 
-    def _contrast(a, b):
-        la, lb = _lum(a), _lum(b)
-        hi, lo = max(la, lb), min(la, lb)
-        return (hi + 0.05) / (lo + 0.05)
+    This used to measure `face` and return whichever ink contrasted better
+    against it. That is the right rule for a surface we actually paint, and the
+    wrong one for a tk.Button on macOS: Aqua ignores a button's bg outright and
+    draws its own bezel — bright while the window is active, grey once it is
+    not. The colour we ask for is never the colour the label sits on. Setting
+    bd=0 / highlightthickness=0 does not change it either: Clipper sets both,
+    asks for a #505050 face on all fifteen of its buttons, and still renders
+    light.
 
-    return (BTN_INK_DARK
-            if _contrast(BTN_INK_DARK, face) >= _contrast(BTN_INK_LIGHT, face)
-            else BTN_INK_LIGHT)
+    So on a dark declared face the old logic returned near-white ink, which
+    landed on Aqua's bright bezel — invisible while the window was focused,
+    readable again the moment you clicked away. Exactly the reported bug.
+
+    The ink has to read against what Aqua actually draws, and that is light in
+    both states. Hence: always dark. Clipper and Track Command have hardcoded
+    dark ink from the start and have never shown the problem — the control
+    group. `face` stays in the signature so the call sites, which do still set
+    meaningful bg values, need no changes.
+    """
+    return BTN_INK_DARK
 
 class TBtn(tk.Button):
     def __init__(self, parent, bg=BTN, fg=None, padx=12, pady=6, font=F_MAIN, **kw):
@@ -424,7 +431,7 @@ class ClipRenamerPro:
         _tb.pack(fill="x")
         tk.Label(_tb, text="  Clip Renamer Pro", fg=ACCENT, bg=TITLE_BG,
                  font=("Avenir Next", 18)).pack(side="left")
-        tk.Label(_tb, text="v2.2", fg=DIM, bg=TITLE_BG,
+        tk.Label(_tb, text="v2.2.1", fg=DIM, bg=TITLE_BG,
                  font=("Avenir Next", 10)).pack(side="left", pady=(6, 0))
         _info = tk.Frame(_tb, bg=TITLE_BG)
         _info.pack(side="right", padx=12)
