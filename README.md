@@ -124,7 +124,7 @@ Reel Time Plus is a running-time calculator for TV and film editors. Create name
 
 **Fully Standalone** — Reel Time Plus runs as a native app on macOS (Intel + Apple Silicon) and Windows with no DaVinci Resolve connection required, no Python install, nothing to configure. Also available as a `.py` script for the Resolve scripts menu.
 
-### <img src="https://resolve-tools.com/images/icons/icon-clipper.png" width="28" style="vertical-align:middle;"> Clipper v1.3
+### <img src="https://resolve-tools.com/images/icons/icon-clipper.png" width="28" style="vertical-align:middle;"> Clipper v1.4
 *One click. Every clip. Done.*
 
 You've got a finished cut on V1 — or a selects reel on V2 — and you want every clip turned into a subclip and organized into a Media Pool bin. You could right-click each one, fill in the in/out points, name it, choose the bin... forty times. Or you could open Clipper, pick the track, pick the bin, and hit Create.
@@ -142,6 +142,10 @@ Clipper reads every clip on the chosen track, calculates the exact source in/out
 **In/Out Range** — Limit clip creation to only the clips that fall within the timeline's In/Out marks.
 
 **Clip from Range** — Set an In and Out mark on the timeline, pick a track (or All Tracks), and Clipper assembles all the clips in that range into one new timeline sequence in your chosen bin. Optionally preserves clip markers.
+
+**Name from Markers** — Subclips can take their name from the first named marker on each clip, so a plate lands in the bin called whatever the marker called it. Clip markers are read first, then ruler markers falling inside the clip's span; stray markers sitting on unused source footage are ignored.
+
+**Build Reel** — Assemble everything a run just created into one sequence, in order, right after creation. Name it yourself in the reel name field: leave it blank and the reel takes the timeline and track it came from (`MyTimeline — V4 REEL`), or type `VFX 024` and that is exactly what lands in the bin. Repeat pulls of the same name pick up `_02` / `_03` suffixes automatically.
 
 **Live Preview** — See the exact subclip name, source clip, source In TC, source Out TC, and duration for every clip on the track before creating anything. Clips that can't become subclips (generators, titles, compounds) are flagged in amber and skipped gracefully.
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clipper 1.3 — DaVinci Resolve Subclip Generator
+Clipper 1.4 — DaVinci Resolve Subclip Generator
 
 Creates a Media Pool subclip for every clip on a chosen video track
 in the current Resolve timeline. Part of the Marker Madness suite.
@@ -274,12 +274,12 @@ class Clipper:
     def __init__(self, root):
         self.root = root
         self.root.withdraw()
-        self.root.title("Clipper 1.3")
+        self.root.title("Clipper 1.4")
         self.root.configure(bg=BG)
         self.root.createcommand('::tk::mac::ShowHelp',
             lambda: webbrowser.open("https://resolve-tools.com/clipper-guide"))
         self.root.resizable(True, True)
-        self.root.minsize(640, 560)
+        self.root.minsize(640, 592)   # +32 vs 1.3 — the reel-name row's exact height
 
         _w, _h = 720, 900
         self.root.update_idletasks()
@@ -328,6 +328,7 @@ class Clipper:
         self._order_mode_var   = tk.StringVar(value="seq")   # "seq" (T01_) | "tc" (timecode)
         self._video_only_var   = tk.BooleanVar(value=False)  # strip audio tracks from created timelines
         self._reel_var         = tk.BooleanVar(value=False)  # assemble created clips into one reel timeline
+        self._reel_name_var    = tk.StringVar(value="")      # custom reel name — blank = auto (<timeline> — <track> REEL)
         self._show_summary_var = tk.BooleanVar(value=True)   # show completion dialog after each run
 
         # internal data
@@ -467,7 +468,7 @@ class Clipper:
         name_row.pack(fill="x", padx=16, pady=(12, 0))
         tk.Label(name_row, text="✂  Clipper", fg=ACCENT, bg=PANEL,
                  font=("Avenir Next", 18, "bold")).pack(side="left")
-        tk.Label(name_row, text="v1.3", fg=DIM, bg=PANEL,
+        tk.Label(name_row, text="v1.4", fg=DIM, bg=PANEL,
                  font=F_SMALL).pack(side="left", padx=(4, 0), pady=(4, 0))
 
         # Float on top checkbox
@@ -768,15 +769,31 @@ class Clipper:
         opts_frame2b = tk.Frame(cf, bg=BG)
         opts_frame2b.grid(row=13, column=0, columnspan=3, sticky="w", pady=(0, 4))
         tk.Checkbutton(opts_frame2b,
-                       text="Build reel  (assemble created clips into one sequence — beta)",
+                       text="Build reel  (assemble created clips into one sequence)",
                        variable=self._reel_var,
+                       command=self._on_reel_toggle,
                        fg=TEXT, bg=BG, activeforeground=TEXT,
                        activebackground=BG, selectcolor=ENTRY_BG,
                        font=F_MAIN).pack(side="left")
 
-        # Row 13 — completion dialog toggle
+        # Reel name — its own indented row for the same reason as above.
+        # Blank falls back to the auto name; typed is used verbatim.
+        opts_frame2c = tk.Frame(cf, bg=BG)
+        opts_frame2c.grid(row=14, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        tk.Label(opts_frame2c, text="Reel name:", fg=TEXT, bg=BG,
+                 font=F_MAIN).pack(side="left", padx=(22, 8))
+        self._reel_name_entry = tk.Entry(
+            opts_frame2c, textvariable=self._reel_name_var, bg=ENTRY_BG,
+            fg=TEXT, insertbackground=TEXT, relief="flat", font=F_MAIN,
+            width=24, disabledbackground=ENTRY_BG, disabledforeground=DIM)
+        self._reel_name_entry.pack(side="left")
+        tk.Label(opts_frame2c, text="(blank = “<timeline> — <track> REEL”)",
+                 fg=DIM, bg=BG, font=F_SMALL).pack(side="left", padx=(10, 0))
+        self._on_reel_toggle()   # start greyed — Build reel is off by default
+
+        # Row 15 — completion dialog toggle
         opts_frame3 = tk.Frame(cf, bg=BG)
-        opts_frame3.grid(row=14, column=0, columnspan=3, sticky="w", pady=(2, 6))
+        opts_frame3.grid(row=15, column=0, columnspan=3, sticky="w", pady=(2, 6))
 
         tk.Checkbutton(opts_frame3,
                        text="Show completion summary",
@@ -787,7 +804,7 @@ class Clipper:
 
         # Separator
         tk.Frame(cf, bg=BTN_HOV, height=1).grid(
-            row=15, column=0, columnspan=3, sticky="ew", pady=(0, 0))
+            row=16, column=0, columnspan=3, sticky="ew", pady=(0, 0))
 
     def _build_preview(self):
         pf = tk.Frame(self.root, bg=BG)
@@ -2339,6 +2356,22 @@ class Clipper:
             pass
         return names
 
+    def _on_reel_toggle(self):
+        """Grey the reel-name field when Build reel is off — it does nothing then."""
+        try:
+            self._reel_name_entry.configure(
+                state="normal" if self._reel_var.get() else "disabled")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _clean_reel_name(raw, limit=120):
+        """Tidy a user-typed reel name: drop non-printables, collapse runs of
+        whitespace, cap the length. Returns "" when nothing usable is left,
+        which is the caller's signal to fall back to the auto name."""
+        s = "".join(ch for ch in (raw or "") if ch.isprintable())
+        return " ".join(s.split())[:limit].strip()
+
     @staticmethod
     def _unique_tl_name(base, existing):
         """Return base, or base_02 / base_03 … if base is taken.
@@ -2831,8 +2864,13 @@ class Clipper:
 
         # Create the reel timeline — pre-uniquify the name (attempting a
         # taken name pops Resolve's blocking duplicate dialog)
-        tl_name   = self._timeline.GetName() if self._timeline else "Clipper"
-        base      = f"{tl_name} — {track_lbl} REEL"
+        custom = self._clean_reel_name(self._reel_name_var.get())
+        if custom:
+            base = custom
+            self._log(f"  reel: custom name '{base}'")
+        else:
+            tl_name = self._timeline.GetName() if self._timeline else "Clipper"
+            base    = f"{tl_name} — {track_lbl} REEL"
         reel_name = self._unique_tl_name(base, self._existing_timeline_names())
         if reel_name != base:
             self._log(f"  reel: '{base}' exists — creating as '{reel_name}'")

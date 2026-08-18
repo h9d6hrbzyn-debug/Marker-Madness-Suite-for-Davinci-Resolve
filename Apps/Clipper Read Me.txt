@@ -1,4 +1,4 @@
-Clipper v1.3
+Clipper v1.4
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -9,22 +9,15 @@ sequences in one click. Set in/out points with a marker pair, name your
 destination bin, and Clipper does the rest — with optional handle padding,
 timeline ordering prefixes, and multi-track support.
 
-WHAT'S NEW IN 1.3
-- Name from markers — subclips can take the name of the first named
-  marker on each clip (clip markers first, then ruler markers in the
-  clip's span; stray markers on unused source footage are ignored)
-- Add handles toggle — handles are OFF by default; switch on and you
-  get your saved default. ★ Make Default remembers your preferred
-  handle count (and custom head/tail) across launches
-- Build reel (beta) — assemble the created clips into one sequence,
-  in order, right after creation
-- Collision-proof naming — if a timeline name is already taken the
-  new one gets _02 / _03… automatically; no more blocked creations
-- Clip from Range: every placement is verified; grouped/synced clips
-  that Resolve's API can't place are skipped BY NAME with a flatten
-  tip (copy to a spare track, flatten the copies, re-run); stray
-  audio from failed placements is cleaned up automatically
-- Track selection is remembered across runs and refreshes
+WHAT'S NEW IN 1.4
+- Name your reel — Build reel now has its own name field. Leave it
+  blank and the reel is named the way it always was
+  ("<timeline> — <track> REEL"); type something and the reel is named
+  exactly that. Built for VFX pulls where the reel should carry the
+  scene rather than the source track — VFX 024, SC024 EXPORT, and so
+  on. Repeat pulls of the same name get _02 / _03 automatically
+- Build reel is out of beta — assembling the created clips into one
+  sequence has been running clean and is now a standard feature
 
 TWO BUTTONS, TWO JOBS
 - Create In/Out Clips → the VFX pull: individually named, export-
@@ -37,7 +30,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Clipper 1.3.py" to:
+1. Copy "Clipper 1.4.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -47,7 +40,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Clipper 1.3
+   Workspace → Scripts → Utility → Clipper 1.4
 
 FULL DOCUMENTATION
    resolve-tools.com/clipper-guide
