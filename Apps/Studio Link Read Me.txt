@@ -1,4 +1,4 @@
-STUDIO LINK 1.2 — Modify Studio → DaVinci Resolve live bridge
+STUDIO LINK 1.2.1 — Modify Studio → DaVinci Resolve live bridge
 Part of the Marker Madness suite
 
 WHAT IT DOES
@@ -8,6 +8,11 @@ Resolve project — sorted into Images / Video / Audio sub-bins, within
 seconds of the generation finishing. Generate on one monitor, cut on the
 other. It never touches your timeline; it only stocks bins.
 
+WHAT'S NEW IN 1.2.1
+- One window only — launching it again brings the window already open
+  to the front instead of starting a second bridge polling the same
+  job queue
+
 REQUIREMENTS
 • Modify Studio running locally (8766/8765) OR on the QNAP
   (192.168.1.45:8790). For QNAP use, mount the share first:
@@ -16,7 +21,7 @@ REQUIREMENTS
 • DaVinci Resolve with an open project
 
 INSTALL
-Copy "Studio Link 1.2.py" into your Resolve scripts folder, then run it
+Copy "Studio Link 1.2.1.py" into your Resolve scripts folder, then run it
 from Workspace > Scripts > Utility inside Resolve.
 
 macOS:   /Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/

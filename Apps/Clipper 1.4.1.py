@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clipper 1.4 — DaVinci Resolve Subclip Generator
+Clipper 1.4.1 — DaVinci Resolve Subclip Generator
 
 Creates a Media Pool subclip for every clip on a chosen video track
 in the current Resolve timeline. Part of the Marker Madness suite.
@@ -16,6 +16,9 @@ Installation:
 """
 
 import sys
+import subprocess
+import threading
+import socket
 import os
 import json
 import tkinter as tk
@@ -274,7 +277,7 @@ class Clipper:
     def __init__(self, root):
         self.root = root
         self.root.withdraw()
-        self.root.title("Clipper 1.4")
+        self.root.title("Clipper 1.4.1")
         self.root.configure(bg=BG)
         self.root.createcommand('::tk::mac::ShowHelp',
             lambda: webbrowser.open("https://resolve-tools.com/clipper-guide"))
@@ -468,7 +471,7 @@ class Clipper:
         name_row.pack(fill="x", padx=16, pady=(12, 0))
         tk.Label(name_row, text="✂  Clipper", fg=ACCENT, bg=PANEL,
                  font=("Avenir Next", 18, "bold")).pack(side="left")
-        tk.Label(name_row, text="v1.4", fg=DIM, bg=PANEL,
+        tk.Label(name_row, text="v1.4.1", fg=DIM, bg=PANEL,
                  font=F_SMALL).pack(side="left", padx=(4, 0), pady=(4, 0))
 
         # Float on top checkbox
@@ -3105,9 +3108,94 @@ class Clipper:
 # Entry point
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Single instance
+# ---------------------------------------------------------------------------
+# Binding a loopback port is the lock. A second launch fails the bind, knocks
+# on the port so the window already open comes forward, then quits. The OS
+# releases the port when the process dies, so a crash can never leave the tool
+# unlaunchable the way a stale PID file would.
+
+SINGLE_INSTANCE_PORT = 49734
+
+_lock_sock  = None                    # held open for the life of the process
+_raise_flag = threading.Event()       # socket thread -> main thread
+
+
+def claim_single_instance(port=SINGLE_INSTANCE_PORT):
+    """True if we are the only instance; else wake the live one and return False."""
+    global _lock_sock
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", port))
+    except OSError:
+        s.close()
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1.0) as c:
+                c.sendall(b"raise")
+        except OSError:
+            pass                      # it died between our bind and our knock
+        return False
+    s.listen(8)
+    _lock_sock = s
+    threading.Thread(target=_listen_for_knocks, daemon=True).start()
+    return True
+
+
+def _listen_for_knocks():
+    while True:
+        try:
+            conn, _ = _lock_sock.accept()
+        except OSError:
+            return                    # socket closed during shutdown
+        try:
+            conn.recv(16)
+        except OSError:
+            pass
+        conn.close()
+        _raise_flag.set()
+
+
+def watch_for_raise(root):
+    """Poll the flag on the main thread; Tk is never touched from the thread."""
+    def poll():
+        if _raise_flag.is_set():
+            _raise_flag.clear()
+            bring_to_front(root)
+        root.after(250, poll)
+    root.after(250, poll)
+
+
+def bring_to_front(root):
+    try:
+        was_top = bool(root.attributes("-topmost"))
+        root.deiconify()
+        root.lift()
+        root.attributes("-topmost", True)
+        if not was_top:               # Studio Link stays pinned; don't unpin it
+            root.after(300, lambda: root.attributes("-topmost", False))
+        root.focus_force()
+    except tk.TclError:
+        return
+    if sys.platform == "darwin":
+        # Tk can't lift itself above another app on macOS — ask the WM to.
+        try:
+            subprocess.run(
+                ["/usr/bin/osascript", "-e",
+                 'tell application "System Events" to set frontmost of '
+                 'the first process whose unix id is %d to true' % os.getpid()],
+                capture_output=True, timeout=2)
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
+    if not claim_single_instance():
+        sys.exit(0)
+
     try:
         root = tk.Tk()
+        watch_for_raise(root)
         if sys.platform == "darwin":
             import tempfile as _tempfile, base64 as _b64
             _icon_path = None

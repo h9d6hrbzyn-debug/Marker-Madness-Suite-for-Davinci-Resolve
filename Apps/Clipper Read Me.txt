@@ -1,4 +1,4 @@
-Clipper v1.4
+Clipper v1.4.1
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -8,6 +8,10 @@ Clipper turns your timeline markers into individual sub-clips or complete
 sequences in one click. Set in/out points with a marker pair, name your
 destination bin, and Clipper does the rest — with optional handle padding,
 timeline ordering prefixes, and multi-track support.
+
+WHAT'S NEW IN 1.4.1
+- One window only — launching it again brings the window already open
+  to the front instead of starting a second copy
 
 WHAT'S NEW IN 1.4
 - Name your reel — Build reel now has its own name field. Leave it
@@ -30,7 +34,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Clipper 1.4.py" to:
+1. Copy "Clipper 1.4.1.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -40,7 +44,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Clipper 1.4
+   Workspace → Scripts → Utility → Clipper 1.4.1
 
 FULL DOCUMENTATION
    resolve-tools.com/clipper-guide

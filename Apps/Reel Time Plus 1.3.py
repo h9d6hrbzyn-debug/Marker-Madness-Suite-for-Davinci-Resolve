@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Reel Time Plus 1.2 — Running Time Calculator
+Reel Time Plus 1.3 — Running Time Calculator
 
 Plan and track running times across multiple shows or projects.
 Add acts or reels, set a goal time, configure commercial breaks or
@@ -12,7 +12,7 @@ connection required.
 Installation:
   Copy to your DaVinci Resolve scripts folder and run from
   Workspace > Scripts > Utility inside DaVinci Resolve, or
-  run directly with:  python3 "Reel Time Plus 1.2.py"
+  run directly with:  python3 "Reel Time Plus 1.3.py"
 
   macOS:   /Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/
   Windows: C:\\ProgramData\\Blackmagic Design\\DaVinci Resolve\\Fusion\\Scripts\\Utility\\
@@ -20,6 +20,9 @@ Installation:
 """
 
 import sys
+import subprocess
+import threading
+import socket
 import os
 import json
 import uuid
@@ -932,7 +935,7 @@ class ReelTimePlus:
         tb.pack(fill="x")
         tk.Label(tb, text="  Reel Time Plus", fg=ACCENT, bg=TITLE_BG,
                  font=("Avenir Next", 18)).pack(side="left")
-        tk.Label(tb, text="v1.2", fg=DIM, bg=TITLE_BG,
+        tk.Label(tb, text="v1.3", fg=DIM, bg=TITLE_BG,
                  font=("Avenir Next", 10)).pack(side="left", pady=(6, 0))
         tk.Checkbutton(tb, text="Float on Top", variable=self._stay_on_top,
                        command=self._apply_topmost,
@@ -1641,29 +1644,60 @@ class ReelTimePlus:
 
         _, total = calc_totals(proj)
         goal     = proj.get("goal_frames", 0)
-        fps_key  = proj.get("fps_key", "23.98 ndf")
 
         PAD = 3
         Y0  = 6
         H   = 32
+        LW  = 2                      # frame line width
         bar_w = w - PAD * 2
 
-        # Goal boundary bracket (green if at/under, red if over)
-        if goal > 0:
-            ref     = max(total, goal)
-            goal_x  = PAD + bar_w * goal / ref
-            color   = GREEN if total <= goal else RED
-            canvas.create_rectangle(PAD, Y0, goal_x, Y0 + H,
-                                    outline=color, fill="", width=2)
+        # Border frame — spans the full bar and reports status by colour.
+        frame_col = SEP if goal <= 0 else (RED if total > goal else GREEN)
+        canvas.create_rectangle(PAD, Y0, PAD + bar_w, Y0 + H,
+                                outline=frame_col, fill="", width=LW)
 
-        # Segment blocks — proportional to content
-        x = PAD
+        # Blocks live strictly inside the frame line, never on top of it.
+        in_x0 = PAD + LW
+        in_w  = bar_w - LW * 2
+        if in_w <= 0:
+            return
+
+        # One ruler for the whole bar: runtime-with-breaks vs. the target,
+        # whichever is longer. Breaks and leader are drawn as gaps, which is
+        # what keeps the blocks on the same scale as the frame — sizing blocks
+        # off content alone made the last one overrun whenever breaks existed.
+        ref = max(total, goal) or cf
+
+        bt      = proj.get("break_type", "no_breaks")
+        head    = proj.get("leader_head_frames", 0) if bt == "film_leader" else 0
+        tail    = proj.get("leader_tail_frames", 0) if bt == "film_leader" else 0
+        gap     = proj.get("break_frames", 0) if bt == "tv_breaks" else 0
+        per_seg = (bt == "film_leader"
+                   and proj.get("leader_mode", "whole_show") == "per_segment")
+
+        # (frames, colour) runs; colour None means dead air — break or leader.
+        runs = []
+        if head and not per_seg:
+            runs.append((head, None))
         for i, seg in enumerate(segs):
-            sw2 = max(1, seg.get("frames", 0) / cf * bar_w)
-            color = seg.get("color") or SEG_COLORS[i % len(SEG_COLORS)]
-            canvas.create_rectangle(x, Y0 + 3, x + sw2 - 1, Y0 + H - 3,
-                                     fill=color, outline="")
-            x += sw2
+            if per_seg and head:
+                runs.append((head, None))
+            elif i and gap:
+                runs.append((gap, None))
+            runs.append((seg.get("frames", 0),
+                         seg.get("color") or SEG_COLORS[i % len(SEG_COLORS)]))
+            if per_seg and tail:
+                runs.append((tail, None))
+        if tail and not per_seg:
+            runs.append((tail, None))
+
+        x = float(in_x0)
+        for frames, color in runs:
+            rw = frames / ref * in_w
+            if color:
+                canvas.create_rectangle(x, Y0 + 3, max(x + 1, x + rw - 1),
+                                        Y0 + H - 3, fill=color, outline="")
+            x += rw
 
     # ── segment rows ────────────────────────────────────────────────────────
 
@@ -2531,8 +2565,93 @@ class ReelTimePlus:
 # Entry point
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Single instance
+# ---------------------------------------------------------------------------
+# Binding a loopback port is the lock. A second launch fails the bind, knocks
+# on the port so the window already open comes forward, then quits. The OS
+# releases the port when the process dies, so a crash can never leave the tool
+# unlaunchable the way a stale PID file would.
+
+SINGLE_INSTANCE_PORT = 49731
+
+_lock_sock  = None                    # held open for the life of the process
+_raise_flag = threading.Event()       # socket thread -> main thread
+
+
+def claim_single_instance(port=SINGLE_INSTANCE_PORT):
+    """True if we are the only instance; else wake the live one and return False."""
+    global _lock_sock
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", port))
+    except OSError:
+        s.close()
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1.0) as c:
+                c.sendall(b"raise")
+        except OSError:
+            pass                      # it died between our bind and our knock
+        return False
+    s.listen(8)
+    _lock_sock = s
+    threading.Thread(target=_listen_for_knocks, daemon=True).start()
+    return True
+
+
+def _listen_for_knocks():
+    while True:
+        try:
+            conn, _ = _lock_sock.accept()
+        except OSError:
+            return                    # socket closed during shutdown
+        try:
+            conn.recv(16)
+        except OSError:
+            pass
+        conn.close()
+        _raise_flag.set()
+
+
+def watch_for_raise(root):
+    """Poll the flag on the main thread; Tk is never touched from the thread."""
+    def poll():
+        if _raise_flag.is_set():
+            _raise_flag.clear()
+            bring_to_front(root)
+        root.after(250, poll)
+    root.after(250, poll)
+
+
+def bring_to_front(root):
+    try:
+        was_top = bool(root.attributes("-topmost"))
+        root.deiconify()
+        root.lift()
+        root.attributes("-topmost", True)
+        if not was_top:               # Studio Link stays pinned; don't unpin it
+            root.after(300, lambda: root.attributes("-topmost", False))
+        root.focus_force()
+    except tk.TclError:
+        return
+    if sys.platform == "darwin":
+        # Tk can't lift itself above another app on macOS — ask the WM to.
+        try:
+            subprocess.run(
+                ["/usr/bin/osascript", "-e",
+                 'tell application "System Events" to set frontmost of '
+                 'the first process whose unix id is %d to true' % os.getpid()],
+                capture_output=True, timeout=2)
+        except Exception:
+            pass
+
+
 def main():
+    if not claim_single_instance():
+        return
+
     root = tk.Tk()
+    watch_for_raise(root)
     if sys.platform == "darwin":
         import tempfile as _tempfile, base64 as _b64
         _icon_path = None

@@ -1,0 +1,62 @@
+Resolve Tools Suite
+Five DaVinci Resolve Scripts by Resolve Tools
+resolve-tools.com
+──────────────────────────────────────────────
+
+WHAT'S INCLUDED
+
+  Marker Madness 1.8.1.py
+  Full-featured marker manager — add, edit, search, filter, color-code,
+  export, and exchange markers with Premiere Pro and Avid.
+  Guide: resolve-tools.com/marker-madness-guide
+
+  Clip Renamer Pro 2.2.2.py
+  Bulk clip renamer — build names from tokens, preview before committing.
+  Guide: resolve-tools.com/clip-renamer-pro-guide
+
+  Track Command 1.2.1.py
+  Track manager — rename, reorder, add, delete, and toggle track visibility.
+  Guide: resolve-tools.com/track-command-guide
+
+  Reel Time Plus 1.3.py
+  Timecode calculator and reel timer for editors and DITs.
+  Guide: resolve-tools.com/reel-time-plus-guide
+
+  Clipper 1.4.1.py
+  Marker-to-clip tool — turn timeline markers into sub-clips or sequences.
+  Guide: resolve-tools.com/clipper-guide
+
+NEW IN THIS RELEASE
+  Every tool now runs one window at a time — launching one that is
+  already open brings its window to the front instead of starting a
+  second copy.
+
+  Reel Time Plus 1.3 also fixes the act bar: the coloured blocks were
+  sized against content while the target box was sized against the full
+  runtime, so on any show with breaks the last act ran out over the
+  border. Both are on one scale now, and TV breaks or film leader show
+  as the gaps between blocks.
+
+REQUIREMENTS
+• DaVinci Resolve 18 or later (free version and Studio both supported)
+• Python 3 — free from python.org/downloads (the Resolve console
+  links to the same installer when Python isn't detected)
+• macOS
+
+INSTALLATION
+Copy all five .py files to:
+   ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
+   Fusion/Scripts/Utility/
+
+(Create the Utility folder if it doesn't exist.)
+Restart DaVinci Resolve if it is already running.
+
+LAUNCH
+From the Resolve menu bar:
+   Workspace → Scripts → Utility → [App Name]
+
+WEBSITE
+   resolve-tools.com
+
+QUESTIONS OR FEEDBACK
+   resolve-tools.com/feedback

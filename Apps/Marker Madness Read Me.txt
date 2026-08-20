@@ -1,4 +1,4 @@
-Marker Madness v1.8
+Marker Madness v1.8.1
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -9,6 +9,10 @@ Add, edit, search, filter, color-code, and bulk-edit markers from a
 single panel. Export to HTML or CSV, detect shot changes between two
 exports, sync VFX shot data with clip metadata, and exchange markers
 bidirectionally with Premiere Pro and Avid Media Composer.
+
+WHAT'S NEW IN 1.8.1
+- One window only — launching it again brings the window already open
+  to the front instead of starting a second copy
 
 WHAT'S NEW IN 1.8
 - Batch Stamp can number as it stamps. Tick "Number each marker",
@@ -131,7 +135,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Marker Madness 1.8.py" to:
+1. Copy "Marker Madness 1.8.1.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -141,7 +145,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Marker Madness 1.8
+   Workspace → Scripts → Utility → Marker Madness 1.8.1
 
 FULL DOCUMENTATION
    resolve-tools.com/marker-madness-guide

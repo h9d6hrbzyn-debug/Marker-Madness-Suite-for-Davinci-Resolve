@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """
-Studio Link 1.2 — Modify Studio → DaVinci Resolve live bridge
+Studio Link 1.2.1 — Modify Studio → DaVinci Resolve live bridge
+
+1.2.1: single instance — launching it again raises the window already
+open instead of starting a second bridge polling the same job queue.
 
 1.2: sign-in aware — the QNAP Studio now runs multi-user with a login wall,
 so the link signs in like any user: an in-window sign-in row appears when
@@ -39,6 +42,8 @@ proxy on 8765 is tried as a fallback).
 """
 
 import sys
+import subprocess
+import socket
 import os
 import json
 import time
@@ -303,7 +308,7 @@ class StudioLink:
         self.stop_flag = threading.Event()
 
         self.root = tk.Tk()
-        self.root.title("Studio Link 1.2")
+        self.root.title("Studio Link 1.2.1")
         self.root.configure(bg=BG)
         self.root.geometry("420x430")
         self.root.attributes("-topmost", True)
@@ -323,7 +328,7 @@ class StudioLink:
     def _build_ui(self):
         title = tk.Frame(self.root, bg=TITLE_BG)
         title.pack(fill="x")
-        tk.Label(title, text="STUDIO LINK 1.2", bg=TITLE_BG, fg=ACCENT,
+        tk.Label(title, text="STUDIO LINK 1.2.1", bg=TITLE_BG, fg=ACCENT,
                  font=F_BOLD, pady=6).pack(side="left", padx=10)
         self.lbl_studio = tk.Label(title, text="● Studio", bg=TITLE_BG,
                                    fg=DIM, font=F_SMALL)
@@ -622,8 +627,93 @@ class StudioLink:
         self.root.destroy()
 
     def run(self):
+        watch_for_raise(self.root)
         self.root.mainloop()
 
 
+# ---------------------------------------------------------------------------
+# Single instance
+# ---------------------------------------------------------------------------
+# Binding a loopback port is the lock. A second launch fails the bind, knocks
+# on the port so the window already open comes forward, then quits. The OS
+# releases the port when the process dies, so a crash can never leave the tool
+# unlaunchable the way a stale PID file would.
+
+SINGLE_INSTANCE_PORT = 49736
+
+_lock_sock  = None                    # held open for the life of the process
+_raise_flag = threading.Event()       # socket thread -> main thread
+
+
+def claim_single_instance(port=SINGLE_INSTANCE_PORT):
+    """True if we are the only instance; else wake the live one and return False."""
+    global _lock_sock
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", port))
+    except OSError:
+        s.close()
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1.0) as c:
+                c.sendall(b"raise")
+        except OSError:
+            pass                      # it died between our bind and our knock
+        return False
+    s.listen(8)
+    _lock_sock = s
+    threading.Thread(target=_listen_for_knocks, daemon=True).start()
+    return True
+
+
+def _listen_for_knocks():
+    while True:
+        try:
+            conn, _ = _lock_sock.accept()
+        except OSError:
+            return                    # socket closed during shutdown
+        try:
+            conn.recv(16)
+        except OSError:
+            pass
+        conn.close()
+        _raise_flag.set()
+
+
+def watch_for_raise(root):
+    """Poll the flag on the main thread; Tk is never touched from the thread."""
+    def poll():
+        if _raise_flag.is_set():
+            _raise_flag.clear()
+            bring_to_front(root)
+        root.after(250, poll)
+    root.after(250, poll)
+
+
+def bring_to_front(root):
+    try:
+        was_top = bool(root.attributes("-topmost"))
+        root.deiconify()
+        root.lift()
+        root.attributes("-topmost", True)
+        if not was_top:               # Studio Link stays pinned; don't unpin it
+            root.after(300, lambda: root.attributes("-topmost", False))
+        root.focus_force()
+    except tk.TclError:
+        return
+    if sys.platform == "darwin":
+        # Tk can't lift itself above another app on macOS — ask the WM to.
+        try:
+            subprocess.run(
+                ["/usr/bin/osascript", "-e",
+                 'tell application "System Events" to set frontmost of '
+                 'the first process whose unix id is %d to true' % os.getpid()],
+                capture_output=True, timeout=2)
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
+    if not claim_single_instance():
+        sys.exit(0)
+
     StudioLink().run()
