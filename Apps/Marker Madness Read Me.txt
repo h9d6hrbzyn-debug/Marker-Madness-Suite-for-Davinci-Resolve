@@ -1,4 +1,4 @@
-Marker Madness v1.8.1
+Marker Madness v1.8.3
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -9,6 +9,20 @@ Add, edit, search, filter, color-code, and bulk-edit markers from a
 single panel. Export to HTML or CSV, detect shot changes between two
 exports, sync VFX shot data with clip metadata, and exchange markers
 bidirectionally with Premiere Pro and Avid Media Composer.
+
+WHAT'S NEW IN 1.8.3
+- Markers on title and generator clips (Text+, Fusion titles, etc.)
+  now appear in the list. Resolve's API reports no source offset for
+  generators, so their marker positions landed outside the clip and
+  were silently filtered out — whole tracks of title markers looked
+  empty. They're now anchored to the title itself (positions are
+  approximate; edit and delete are exact).
+- A broken item on one track no longer stops the scan — every track
+  loads, and any per-track errors are reported in the status bar.
+- New Track column in the main list (V#/A#, Ruler for timeline
+  markers), sortable like every other column and included in CSV
+  export. Column-drag, saved layouts, and display-order export all
+  respect it.
 
 WHAT'S NEW IN 1.8.1
 - One window only — launching it again brings the window already open
@@ -135,7 +149,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Marker Madness 1.8.1.py" to:
+1. Copy "Marker Madness 1.8.3.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -145,7 +159,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Marker Madness 1.8.1
+   Workspace → Scripts → Utility → Marker Madness 1.8.3
 
 FULL DOCUMENTATION
    resolve-tools.com/marker-madness-guide

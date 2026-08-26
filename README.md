@@ -12,12 +12,12 @@ Five free scripting tools for DaVinci Resolve editors. No subscriptions, no nons
 
 ---
 
-### <img src="https://resolve-tools.com/images/icons/icon-marker-madness.png" width="28" style="vertical-align:middle;"> Marker Madness v1.8.1
+### <img src="https://resolve-tools.com/images/icons/icon-marker-madness.png" width="28" style="vertical-align:middle;"> Marker Madness v1.8.3
 *Because your markers deserve better than chaos.*
 
 You dropped a hundred markers across a timeline. Some are on clips, some are on the ruler, some are named, some aren't. You need to find the red ones, rename them all, nudge them two frames earlier, export a CSV with thumbnail frames, and do it before lunch.
 
-Marker Madness puts every marker in your timeline — clip markers and timeline markers alike — into a single, searchable, sortable table you can actually work with.
+Marker Madness puts every marker in your timeline — clip markers and timeline markers alike — into a single, searchable, sortable table you can actually work with — including markers on titles and generators, with a Track column so you always know which layer a marker lives on.
 
 **See Everything** — Timeline markers and clip markers side by side, with timecode, color, name, note, and the clip they live on. Filter by color, filter by type, or search by name, note, or clip name. The list updates live as you type.
 

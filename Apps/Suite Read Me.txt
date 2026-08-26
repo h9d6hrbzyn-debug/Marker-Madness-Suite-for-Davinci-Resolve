@@ -5,7 +5,7 @@ resolve-tools.com
 
 WHAT'S INCLUDED
 
-  Marker Madness 1.8.1.py
+  Marker Madness 1.8.3.py
   Full-featured marker manager — add, edit, search, filter, color-code,
   export, and exchange markers with Premiere Pro and Avid.
   Guide: resolve-tools.com/marker-madness-guide

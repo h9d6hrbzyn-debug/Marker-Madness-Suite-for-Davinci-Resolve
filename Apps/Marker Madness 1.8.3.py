@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Marker Madness 1.8.1 — DaVinci Resolve Marker Manager
+Marker Madness 1.8.3 — DaVinci Resolve Marker Manager
 =====================================================
 A GUI tool to view, add, edit, delete, and export both timeline markers
 and clip-based markers in your current DaVinci Resolve timeline.
@@ -438,6 +438,7 @@ F_STATUS = ("Avenir Next", 10, "italic")
 
 COLUMNS = [
     ("mtype",      "Type",      62,  "center", False, False),
+    ("track",      "Track",     58,  "center", False, False),
     ("frame",      "Frame",     75,  "center", False, False),
     ("timecode",   "Marker TC",     110, "center", False, False),
     ("color",      "Color",          90, "center", False, False),
@@ -458,6 +459,12 @@ NUM_COL      = {f"#{i+1}": c[0] for i, c in enumerate(COLUMNS)}
 
 SORT_KEY = {
     "mtype":    lambda r: r.get("type", ""),
+    # Ruler first, then V1..Vn, then A1..An, trackless (Source) last —
+    # numeric on the index so V11 sorts after V7, not between V1 and V2.
+    "track":    lambda r: ((0, 0) if r.get("type") == "Timeline"
+                           else (1, r.get("track_index", 0)) if r.get("track_type") == "video"
+                           else (2, r.get("track_index", 0)) if r.get("track_type") == "audio"
+                           else (3, 0)),
     "frame":    lambda r: r.get("timeline_frame", 0),
     "timecode": lambda r: r.get("timeline_frame", 0),
     "color":    lambda r: r.get("color", ""),
@@ -555,6 +562,7 @@ def _save_prefs(data: dict):
 
 CSV_COL_DEF = {
     "mtype":      ("Type",          lambda r, fps, sf: r["type"]),
+    "track":      ("Track",         lambda r, fps, sf: track_label(r)),
     "frame":      ("Frame",         lambda r, fps, sf: r["timeline_frame"] + sf),
     "timecode":   ("Timecode",      lambda r, fps, sf: frames_to_tc(r["timeline_frame"] + sf, fps)),
     "color":      ("Color",         lambda r, fps, sf: r["color"]),
@@ -572,6 +580,15 @@ CSV_COL_DEF = {
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def track_label(rec) -> str:
+    """'Ruler' for timeline markers, V#/A# for clip markers, '—' when trackless."""
+    if rec.get("type") == "Timeline":
+        return "Ruler"
+    if not rec.get("track_type"):
+        return "—"
+    prefix = "V" if rec["track_type"] == "video" else "A"
+    return f"{prefix}{rec.get('track_index', 0)}"
 
 def frames_to_tc(frame: int, fps: float) -> str:
     fps_i = round(fps)
@@ -4778,7 +4795,7 @@ def _flow_reflow(row, avail_w):
 # ---------------------------------------------------------------------------
 
 APP_TITLE   = "Marker Madness"
-APP_VERSION = "1.8.1"
+APP_VERSION = "1.8.3"
 
 class MarkerMadness:
     def __init__(self, root: tk.Tk):
@@ -6143,62 +6160,94 @@ class MarkerMadness:
         except Exception:
             tl_end = None
         seen_clip_markers = set()
-        try:
-            for track_type in ("video", "audio"):
-                track_count = self._timeline.GetTrackCount(track_type)
-                for ti in range(1, track_count + 1):
+        # Per-track / per-item error isolation: one bad item (a generator or
+        # adjustment clip that throws on a getter) must never abort the scan —
+        # that silently dropped every track above it (reported as "markers stop
+        # at V7"). Failures are collected and surfaced, and the scan continues.
+        scan_warnings = []
+        for track_type in ("video", "audio"):
+            try:
+                track_count = int(self._timeline.GetTrackCount(track_type) or 0)
+            except Exception as exc:
+                scan_warnings.append(f"{track_type} tracks: {exc}")
+                continue
+            for ti in range(1, track_count + 1):
+                tlabel = f"{'V' if track_type == 'video' else 'A'}{ti}"
+                try:
                     items = self._timeline.GetItemListInTrack(track_type, ti)
-                    if not items:
-                        continue
-                    for ci, item in enumerate(items):
+                except Exception as exc:
+                    scan_warnings.append(f"{tlabel}: {exc}")
+                    continue
+                if not items:
+                    continue
+                for ci, item in enumerate(items):
+                    try:
+                        clip_markers = item.GetMarkers() or {}
+                        clip_start   = item.GetStart()
+                        clip_end     = item.GetEnd()
+                        clip_name    = item.GetName()
                         try:
-                            clip_markers = item.GetMarkers() or {}
-                            clip_start   = item.GetStart()
-                            clip_name    = item.GetName()
-                            try:
-                                left_offset = item.GetLeftOffset() or 0
-                            except Exception:
-                                left_offset = 0
+                            lo_raw = item.GetLeftOffset()
                         except Exception:
+                            lo_raw = None
+                        left_offset = lo_raw if lo_raw is not None else 0
+                    except Exception:
+                        continue
+                    for mf, m in clip_markers.items():
+                        # clip_start / GetEnd() are absolute frames (include
+                        # the timecode offset). Validate in absolute space,
+                        # then normalize to 0-based for consistent storage.
+                        tl_pos_abs = clip_start + mf - left_offset
+                        if (lo_raw is None
+                                and not (clip_start <= tl_pos_abs < clip_end)):
+                            # Generators / titles (Text+ etc.): every offset
+                            # getter returns None, yet their marker keys are
+                            # relative to the generator's internal media start
+                            # — the computed position lands far outside the
+                            # clip and the range filter silently dropped every
+                            # one (markers on title-only tracks vanished from
+                            # the list). No API call recovers the true offset,
+                            # so re-anchor: earliest marker key = clip head,
+                            # keep relative spacing, clamp inside the clip.
+                            # Edit/delete still use the raw marker key, so
+                            # they are unaffected by the approximated display
+                            # position.
+                            base = min(clip_markers)
+                            tl_pos_abs = min(clip_start + (mf - base),
+                                             clip_end - 1)
+                        # Tight filter: must fall within this clip's own
+                        # range. Source/media-pool markers that happen to
+                        # land in the timeline range are caught here.
+                        if not (clip_start <= tl_pos_abs < clip_end):
                             continue
-                        clip_end = item.GetEnd()
-                        for mf, m in clip_markers.items():
-                            # clip_start / GetEnd() are absolute frames (include
-                            # the timecode offset). Validate in absolute space,
-                            # then normalize to 0-based for consistent storage.
-                            tl_pos_abs = clip_start + mf - left_offset
-                            # Tight filter: must fall within this clip's own
-                            # range. Source/media-pool markers that happen to
-                            # land in the timeline range are caught here.
-                            if not (clip_start <= tl_pos_abs < clip_end):
-                                continue
-                            if tl_end is not None and not (self._start_frame <= tl_pos_abs <= tl_end):
-                                continue
-                            tl_pos = tl_pos_abs - self._start_frame
-                            dedup_key = (clip_name, tl_pos, mf)
-                            if dedup_key in seen_clip_markers:
-                                continue
-                            seen_clip_markers.add(dedup_key)
-                            uid = f"c_{track_type}_{ti}_{ci}_{mf}"
-                            rec = self._make_record(
-                                mtype="Clip",
-                                timeline_frame=tl_pos,
-                                marker_frame=mf,
-                                color=m.get("color", "Blue"),
-                                name=m.get("name", ""),
-                                note=m.get("note", ""),
-                                duration=m.get("duration", 1),
-                                clip_name=clip_name,
-                                track_type=track_type,
-                                track_index=ti,
-                                timeline_item=item,
-                                uid=uid,
-                                custom=m.get("customData", "") or "",
-                            )
-                            markers.append(rec)
-        except Exception as clip_exc:
-            # Surface the error in the status bar rather than silently ignoring it
-            self._fps_var.set(self._fps_var.get() + f"  ⚠ clip scan: {clip_exc}")
+                        if tl_end is not None and not (self._start_frame <= tl_pos_abs <= tl_end):
+                            continue
+                        tl_pos = tl_pos_abs - self._start_frame
+                        dedup_key = (clip_name, tl_pos, mf)
+                        if dedup_key in seen_clip_markers:
+                            continue
+                        seen_clip_markers.add(dedup_key)
+                        uid = f"c_{track_type}_{ti}_{ci}_{mf}"
+                        rec = self._make_record(
+                            mtype="Clip",
+                            timeline_frame=tl_pos,
+                            marker_frame=mf,
+                            color=m.get("color", "Blue"),
+                            name=m.get("name", ""),
+                            note=m.get("note", ""),
+                            duration=m.get("duration", 1),
+                            clip_name=clip_name,
+                            track_type=track_type,
+                            track_index=ti,
+                            timeline_item=item,
+                            uid=uid,
+                            custom=m.get("customData", "") or "",
+                        )
+                        markers.append(rec)
+        if scan_warnings:
+            # Surface the first error in the status bar rather than silently ignoring it
+            extra = f" (+{len(scan_warnings) - 1} more)" if len(scan_warnings) > 1 else ""
+            self._fps_var.set(self._fps_var.get() + f"  ⚠ clip scan: {scan_warnings[0]}{extra}")
 
         self._all_markers = markers
         self._by_id       = {r["id"]: r for r in markers}
@@ -6263,12 +6312,7 @@ class MarkerMadness:
     def _track_label(rec):
         """'Ruler' for timeline markers, else V#/A# from the record's track.
         Source (Media Pool) markers have no track — labeled '—'."""
-        if rec["type"] == "Timeline":
-            return "Ruler"
-        if not rec.get("track_type"):
-            return "—"
-        prefix = "V" if rec["track_type"] == "video" else "A"
-        return f"{prefix}{rec['track_index']}"
+        return track_label(rec)
 
     def _track_filter_ok(self, rec, track_f):
         return track_f == "All Tracks" or self._track_label(rec) == track_f
@@ -6369,7 +6413,8 @@ class MarkerMadness:
             self._tree.insert("", "end", iid=rec["id"],
                               text="",
                               image=self._color_imgs.get(rec["color"], self._color_imgs[""]),
-                              values=(label, frame_disp, tc,
+                              values=(label, self._track_label(rec),
+                                      frame_disp, tc,
                                       rec["color"],
                                       "✓" if rec.get("vfx") else "",
                                       rec["name"], rec["note"],
