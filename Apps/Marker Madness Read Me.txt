@@ -1,4 +1,4 @@
-Marker Madness v1.8.3
+Marker Madness v1.8.4
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -9,6 +9,29 @@ Add, edit, search, filter, color-code, and bulk-edit markers from a
 single panel. Export to HTML or CSV, detect shot changes between two
 exports, sync VFX shot data with clip metadata, and exchange markers
 bidirectionally with Premiere Pro and Avid Media Composer.
+
+WHAT'S NEW IN 1.8.4
+- Batch Stamp remembers its settings. Track, color, name, note,
+  duration, position/offset, conflict handling, range mode, and the
+  counter all come back exactly as you last used them — across
+  relaunches too — so stamping a reel scene by scene no longer means
+  re-entering everything each time.
+- The counter's Start comes back exactly as you typed it — restarting
+  every setup from the same base number just works. When a sequence is
+  running, a "Continue at N" button under the counter sets Start to
+  one past the last number stamped, for picking up where you left off.
+- In/Out timecodes are the one thing deliberately not remembered —
+  when you reopen in In/Out mode, the dialog grabs the timeline's
+  current In and Out points automatically.
+- A "Close after stamping" checkbox (remembered too). Untick it and
+  the dialog stays open after each stamp — set a new In/Out, hit
+  Continue, stamp again — with the result reported on a line inside
+  the dialog instead of a popup. Made for working through intercut
+  scenes range by range.
+- A Reset button restores the factory defaults.
+- Full keyboard drive: every button (including ↺ From Timeline) now
+  responds to Space when tabbed to, with a visible focus highlight,
+  and Up/Down in the text fields jump to the start/end of the text.
 
 WHAT'S NEW IN 1.8.3
 - Markers on title and generator clips (Text+, Fusion titles, etc.)
@@ -149,7 +172,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Marker Madness 1.8.3.py" to:
+1. Copy "Marker Madness 1.8.4.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -159,7 +182,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Marker Madness 1.8.3
+   Workspace → Scripts → Utility → Marker Madness 1.8.4
 
 FULL DOCUMENTATION
    resolve-tools.com/marker-madness-guide

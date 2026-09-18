@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Marker Madness 1.8.3 — DaVinci Resolve Marker Manager
+Marker Madness 1.8.4 — DaVinci Resolve Marker Manager
 =====================================================
 A GUI tool to view, add, edit, delete, and export both timeline markers
 and clip-based markers in your current DaVinci Resolve timeline.
@@ -1396,6 +1396,16 @@ class MarkerRenamerDialog(tk.Toplevel):
 # Themed button
 # ---------------------------------------------------------------------------
 
+def _attach_entry_arrow_nav(entry: tk.Entry):
+    """Up jumps the cursor to the start of the field, Down to the end —
+    the same convention as the main table's inline editor. Without this,
+    the arrows do nothing useful in a single-line Entry."""
+    entry.bind("<Up>",   lambda e: (entry.icursor(0),
+                                    entry.xview_moveto(0), "break")[-1])
+    entry.bind("<Down>", lambda e: (entry.icursor("end"),
+                                    entry.xview_moveto(1), "break")[-1])
+
+
 def _attach_entry_menu(widget: tk.Entry):
     """Attach a right-click Cut / Copy / Paste / Select All menu to an Entry.
     Also fixes macOS Tkinter double-paste bug and missing Cmd+A select-all."""
@@ -1461,6 +1471,14 @@ class TBtn(tk.Button):
         _bg = bg
         self.bind("<Enter>", lambda _: self.config(bg=_hov))
         self.bind("<Leave>", lambda _: self.config(bg=_bg))
+        # Keyboard operability. Aqua's built-in Button space handling is
+        # unreliable (some buttons respond, others silently don't), so bind
+        # space explicitly and show focus with the hover face — otherwise
+        # tabbing to a TBtn gives no visual cue and space may do nothing.
+        self.configure(takefocus=1)
+        self.bind("<FocusIn>",  lambda _: self.config(bg=_hov))
+        self.bind("<FocusOut>", lambda _: self.config(bg=_bg))
+        self.bind("<Key-space>", lambda _: (self.invoke(), "break")[-1])
 
 # ---------------------------------------------------------------------------
 # Marker detail dialog
@@ -1988,7 +2006,8 @@ class StampTrackDialog(tk.Toplevel):
     """
 
     def __init__(self, parent, track_list: list,
-                 timeline=None, fps: float = 24.0):
+                 timeline=None, fps: float = 24.0, initial: dict = None,
+                 stamp_cb=None):
         super().__init__(parent)
         self.withdraw()
         # transient(parent) intentionally omitted — on macOS it causes the
@@ -1998,8 +2017,12 @@ class StampTrackDialog(tk.Toplevel):
         self.resizable(False, False)
         self.configure(bg=BG)
         self.result   = None
+        self.persist  = None
         self._tl      = timeline
         self._fps     = fps
+        # Callable (params, persist, dlg) → (next_start, summary) or None.
+        # Used by stay-open mode to stamp without closing the dialog.
+        self._stamp_cb = stamp_cb
 
         tk.Label(self, text="Stamp All Clips on Track",
                  fg=TEXT, bg=BG, font=F_BOLD).pack(padx=28, pady=(18, 4))
@@ -2053,10 +2076,11 @@ class StampTrackDialog(tk.Toplevel):
         tk.Label(grid, text="Name:", fg=TEXT, bg=BG,
                  font=F_MAIN).grid(row=2, column=0, sticky="w", pady=5)
         self._name_var = tk.StringVar()
-        tk.Entry(grid, textvariable=self._name_var, bg=ENTRY_BG, fg=TEXT,
-                 insertbackground=TEXT, relief="flat", font=F_MAIN,
-                 width=32).grid(row=2, column=1, sticky="ew",
-                                padx=(10, 0), pady=5)
+        name_entry = tk.Entry(grid, textvariable=self._name_var, bg=ENTRY_BG,
+                              fg=TEXT, insertbackground=TEXT, relief="flat",
+                              font=F_MAIN, width=32)
+        name_entry.grid(row=2, column=1, sticky="ew", padx=(10, 0), pady=5)
+        _attach_entry_arrow_nav(name_entry)
 
         # Counter — numbers each marker as it is stamped. Same engine as the
         # Marker Renamer (_renamer_transform), so the numbering behaves
@@ -2100,6 +2124,17 @@ class StampTrackDialog(tk.Toplevel):
         _ctr_spin("Start:",  self._ctr_start_var,  0, 9999, width=5)
         _ctr_spin("Step:",   self._ctr_step_var,   1, 9999, width=4)
 
+        # "Continue at N" — the counter's Start restores exactly as typed
+        # (re-numbering each scene from the same base is a real workflow),
+        # so continuing a running sequence is the explicit option instead:
+        # one click sets Start to one step past the last number stamped.
+        try:
+            self._ctr_next = int((initial or {}).get("ctr_next"))
+        except (TypeError, ValueError):
+            self._ctr_next = None
+        self._ctr_wrap = ctr_wrap
+        self._ctr_continue_btn = None
+
         tk.Label(ctr_row, text="Pos:", fg=DIM, bg=BG,
                  font=F_SMALL).pack(side="left", padx=(6, 2))
         self._ctr_pos_cb = ttk.Combobox(ctr_row, textvariable=self._ctr_pos_var,
@@ -2116,6 +2151,7 @@ class StampTrackDialog(tk.Toplevel):
         # read before committing, so it should not look like fine print.
         hint_row = tk.Frame(ctr_wrap, bg=BG)
         hint_row.pack(anchor="w", pady=(7, 1))
+        self._hint_row = hint_row
         self._ctr_hint_lbl = tk.Label(hint_row, text="", fg=DIM, bg=BG,
                                       font=F_SMALL)
         self._ctr_hint_lbl.pack(side="left", padx=(0, 8))
@@ -2127,15 +2163,17 @@ class StampTrackDialog(tk.Toplevel):
                                   wraplength=430, justify="left")
         self._ctr_hint.pack(side="left")
         self._name_var.trace_add("write", lambda *_: self._update_ctr_hint())
+        self._ensure_continue_btn()
 
         # Note
         tk.Label(grid, text="Note:", fg=TEXT, bg=BG,
                  font=F_MAIN).grid(row=4, column=0, sticky="w", pady=5)
         self._note_var = tk.StringVar()
-        tk.Entry(grid, textvariable=self._note_var, bg=ENTRY_BG, fg=TEXT,
-                 insertbackground=TEXT, relief="flat", font=F_MAIN,
-                 width=32).grid(row=4, column=1, sticky="ew",
-                                padx=(10, 0), pady=5)
+        note_entry = tk.Entry(grid, textvariable=self._note_var, bg=ENTRY_BG,
+                              fg=TEXT, insertbackground=TEXT, relief="flat",
+                              font=F_MAIN, width=32)
+        note_entry.grid(row=4, column=1, sticky="ew", padx=(10, 0), pady=5)
+        _attach_entry_arrow_nav(note_entry)
 
         # Duration
         tk.Label(grid, text="Duration:", fg=TEXT, bg=BG,
@@ -2228,25 +2266,57 @@ class StampTrackDialog(tk.Toplevel):
                      relief="flat", font=F_MONO, width=12)
         tk.Label(self._tc_frame, text="In:", fg=DIM, bg=BG,
                  font=F_SMALL).pack(side="left", padx=(0, 4))
-        tk.Entry(self._tc_frame, textvariable=self._range_in_var,
-                 **tc_kw).pack(side="left")
+        in_entry = tk.Entry(self._tc_frame, textvariable=self._range_in_var,
+                            **tc_kw)
+        in_entry.pack(side="left")
+        _attach_entry_arrow_nav(in_entry)
         tk.Label(self._tc_frame, text="Out:", fg=DIM, bg=BG,
                  font=F_SMALL).pack(side="left", padx=(10, 4))
-        tk.Entry(self._tc_frame, textvariable=self._range_out_var,
-                 **tc_kw).pack(side="left")
+        out_entry = tk.Entry(self._tc_frame, textvariable=self._range_out_var,
+                             **tc_kw)
+        out_entry.pack(side="left")
+        _attach_entry_arrow_nav(out_entry)
         TBtn(self._tc_frame, text="↺ From Timeline",
              command=self._grab_from_tl,
              bg=BTN_FACE, padx=8, pady=3,
              font=F_SMALL).pack(side="left", padx=(10, 0))
 
+        # ── Auto-close + last-stamp summary ───────────────────────────────
+        ac_row = tk.Frame(self, bg=BG)
+        ac_row.pack(padx=28, pady=(4, 0), anchor="w", fill="x")
+        self._auto_close_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(ac_row, text="Close after stamping",
+                       variable=self._auto_close_var,
+                       fg=TEXT, bg=BG, activeforeground=TEXT,
+                       activebackground=BG, selectcolor=ENTRY_BG,
+                       font=F_MAIN, **FOCUS).pack(side="left")
+        # Stay-open mode reports each stamp here instead of a popup — a
+        # messagebox would land behind this dialog's -topmost and look hung.
+        self._summary_lbl = tk.Label(self, text="", fg=ACCENT, bg=BG,
+                                     font=F_SMALL, wraplength=430,
+                                     justify="left")
+        self._summary_lbl.pack(padx=28, pady=(2, 0), anchor="w")
+
         # ── Buttons ───────────────────────────────────────────────────────
         bf = tk.Frame(self, bg=BG)
         bf.pack(pady=(10, 18))
         TBtn(bf, text="Stamp",  command=self._ok,     bg=ACCENT).pack(side="left", padx=8)
+        TBtn(bf, text="Reset",  command=self._reset_defaults,
+             bg=BTN_FACE).pack(side="left", padx=8)
         TBtn(bf, text="Cancel", command=self.destroy, bg=ACCENT).pack(side="left", padx=8)
 
+        # Sticky settings: restore the last stamp's configuration so working
+        # scene-by-scene doesn't mean re-entering seven fields every time.
+        if initial:
+            self._apply_settings(initial)
         self._update_offset_state()
         self._on_counter_toggle()
+        self._on_range_changed()
+        # In/Out mode restored → the actual timecodes are the one thing that
+        # must NOT be sticky (a new range is the whole point of the next
+        # stamp), so pull the timeline's current In/Out instead.
+        if initial and self._range_var.get() == "inout":
+            self._grab_from_tl(quiet=True)
         self._wire_focus_marks(self)
         self.bind("<Return>",   lambda _: self._ok())
         self.bind("<KP_Enter>", lambda _: self._ok())
@@ -2273,6 +2343,97 @@ class StampTrackDialog(tk.Toplevel):
                        lambda e: e.widget.config(fg=TEXT, bg=BG,
                                                  activebackground=BG))
             self._wire_focus_marks(w)
+
+    def _apply_settings(self, s: dict):
+        """Restore a saved settings dict onto the dialog's fields.
+
+        Every value is validated against what the dialog would accept —
+        a track that no longer exists or a corrupt prefs entry falls back
+        to the default silently rather than wedging the dialog."""
+        def _i(val, lo, hi, default):
+            try:
+                return min(hi, max(lo, int(val)))
+            except (TypeError, ValueError):
+                return default
+        try:
+            if s.get("track") in self._track_labels:
+                self._track_var.set(s["track"])
+            if s.get("color") in MARKER_COLORS:
+                self._color_var.set(s["color"])
+            self._name_var.set(str(s.get("name", "") or ""))
+            self._note_var.set(str(s.get("note", "") or ""))
+            self._dur_var.set(_i(s.get("duration"), 1, 9999, 1))
+            if s.get("pos") in ("start", "offset"):
+                self._pos_var.set(s["pos"])
+            self._offset_var.set(_i(s.get("offset"), 0, 99999, 0))
+            if s.get("conflicts") in ("skip", "overwrite"):
+                self._skip_var.set(s["conflicts"])
+            if s.get("range_mode") in ("all", "inout"):
+                self._range_var.set(s["range_mode"])
+            self._ctr_var.set(bool(s.get("ctr_on", False)))
+            self._ctr_digits_var.set(_i(s.get("ctr_digits"), 1, 6, 3))
+            self._ctr_start_var.set(_i(s.get("ctr_start"), 0, 9999, 1))
+            self._ctr_step_var.set(_i(s.get("ctr_step"), 1, 9999, 1))
+            if s.get("ctr_pos") in ("After", "Before"):
+                self._ctr_pos_var.set(s["ctr_pos"])
+            self._auto_close_var.set(bool(s.get("auto_close", True)))
+        except Exception:
+            pass
+
+    def _reset_defaults(self):
+        """Back to factory settings — the escape hatch for sticky state."""
+        if self._track_labels:
+            self._track_var.set(self._track_labels[0])
+        self._color_var.set("Blue")
+        self._name_var.set("")
+        self._note_var.set("")
+        self._dur_var.set(1)
+        self._pos_var.set("start")
+        self._offset_var.set(0)
+        self._skip_var.set("skip")
+        self._range_var.set("all")
+        self._range_in_var.set("")
+        self._range_out_var.set("")
+        self._ctr_var.set(False)
+        self._ctr_digits_var.set(3)
+        self._ctr_start_var.set(1)
+        self._ctr_step_var.set(1)
+        self._ctr_pos_var.set("After")
+        self._auto_close_var.set(True)
+        self._update_offset_state()
+        self._on_counter_toggle()
+        self._on_range_changed()
+
+    def _ensure_continue_btn(self):
+        """Create or refresh the "Continue at N" button from self._ctr_next.
+        Safe to call any time — does nothing until a sequence is banked."""
+        if self._ctr_next is None:
+            return
+        if self._ctr_continue_btn is None:
+            cont_row = tk.Frame(self._ctr_wrap, bg=BG)
+            cont_row.pack(anchor="w", pady=(6, 0), before=self._hint_row)
+            self._ctr_continue_btn = TBtn(
+                cont_row, text="",
+                command=lambda: self._ctr_start_var.set(self._ctr_next),
+                bg=BTN_FACE, padx=8, pady=3, font=F_SMALL)
+            self._ctr_continue_btn.pack(side="left")
+            tk.Label(cont_row, text="one past the last number stamped",
+                     fg=DIM, bg=BG, font=F_SMALL).pack(side="left", padx=(8, 0))
+            self._ctr_widgets.append(self._ctr_continue_btn)
+            self._ctr_continue_btn.config(
+                state="normal" if self._ctr_var.get() else "disabled")
+        self._ctr_continue_btn.config(text=f"↺ Continue at {self._ctr_next}")
+
+    def after_stamp(self, next_start, summary):
+        """Stay-open mode: show the stamp's result inside the dialog and
+        refresh the Continue button so chained stamps keep the sequence."""
+        try:
+            self._summary_lbl.config(text=summary or "")
+            if next_start is not None:
+                self._ctr_next = int(next_start)
+                self._ensure_continue_btn()
+        except Exception:
+            pass
 
     def _update_offset_state(self):
         state = "normal" if self._pos_var.get() == "offset" else "disabled"
@@ -2316,8 +2477,12 @@ class StampTrackDialog(tk.Toplevel):
         else:
             self._tc_frame.grid_remove()
 
-    def _grab_from_tl(self):
+    def _grab_from_tl(self, quiet: bool = False):
         """Read timeline In/Out points and populate the TC fields.
+
+        quiet=True suppresses the "can't read" dialogs — used when the grab
+        runs automatically on open (restored In/Out mode), where a popup
+        before the user has touched anything would just be noise.
 
         Resolve 21+  → GetMarkInOut() returns
                         {'video': {'in': <frame>, 'out': <frame>}, 'audio': ...}
@@ -2327,9 +2492,10 @@ class StampTrackDialog(tk.Toplevel):
                         (e.g. 3004219 = 03:00:42:19).
         """
         if not self._tl:
-            messagebox.showinfo("Not available",
-                "No timeline reference — type timecodes manually (HH:MM:SS:FF).",
-                parent=self)
+            if not quiet:
+                messagebox.showinfo("Not available",
+                    "No timeline reference — type timecodes manually (HH:MM:SS:FF).",
+                    parent=self)
             return
 
         # Timeline start frame — needed to convert relative frames to TC
@@ -2427,7 +2593,7 @@ class StampTrackDialog(tk.Toplevel):
                 except Exception:
                     pass
 
-        if not (got_in or got_out):
+        if not (got_in or got_out) and not quiet:
             messagebox.showinfo(
                 "Can't Read In/Out Points",
                 "Couldn't read the timeline In/Out points automatically.\n\n"
@@ -2485,13 +2651,60 @@ class StampTrackDialog(tk.Toplevel):
                     parent=self)
                 counter_cfg = None
 
-        self.result = (
+        params = (
             ttype, tidx,
             self._color_var.get(),
             self._name_var.get().strip(),
             self._note_var.get().strip(),
             dur, offset, skip, range_frames, counter_cfg,
         )
+        # Raw field state for sticky settings — kept separate from `result`
+        # because the result tuple loses information (offset mode with 0,
+        # counter fields while numbering is off, In/Out mode with a bad TC).
+        try:
+            raw_offset = max(0, int(self._offset_var.get()))
+        except (ValueError, tk.TclError):
+            raw_offset = 0
+        self.persist = {
+            "auto_close": bool(self._auto_close_var.get()),
+            "track":      self._track_var.get(),
+            "color":      self._color_var.get(),
+            "name":       self._name_var.get().strip(),
+            "note":       self._note_var.get().strip(),
+            "duration":   dur,
+            "pos":        self._pos_var.get(),
+            "offset":     raw_offset,
+            "conflicts":  self._skip_var.get(),
+            "range_mode": self._range_var.get(),
+            "ctr_on":     bool(self._ctr_var.get()),
+            "ctr_digits": counter_cfg["digits"] if counter_cfg else 3,
+            "ctr_start":  counter_cfg["start"]  if counter_cfg else 1,
+            "ctr_step":   counter_cfg["step"]   if counter_cfg else 1,
+            "ctr_pos":    counter_cfg["pos"]    if counter_cfg else "After",
+        }
+        if not counter_cfg:
+            # Numbering off — still remember the field values for next time
+            def _i(var, lo, hi, default):
+                try:
+                    return min(hi, max(lo, int(var.get())))
+                except (ValueError, tk.TclError):
+                    return default
+            self.persist.update(
+                ctr_digits=_i(self._ctr_digits_var, 1, 6, 3),
+                ctr_start=_i(self._ctr_start_var, 0, 9999, 1),
+                ctr_step=_i(self._ctr_step_var, 1, 9999, 1),
+                ctr_pos=self._ctr_pos_var.get()
+                        if self._ctr_pos_var.get() in ("After", "Before")
+                        else "After",
+            )
+        # Stay-open mode: stamp via the callback and remain up for the next
+        # one — used when working through intercut shots range by range.
+        if self._stamp_cb is not None and not self._auto_close_var.get():
+            res = self._stamp_cb(params, dict(self.persist), self)
+            if res is not None:
+                self.after_stamp(*res)
+            return
+        self.result = params
         self.destroy()
 
 
@@ -4795,7 +5008,7 @@ def _flow_reflow(row, avail_w):
 # ---------------------------------------------------------------------------
 
 APP_TITLE   = "Marker Madness"
-APP_VERSION = "1.8.3"
+APP_VERSION = "1.8.4"
 
 class MarkerMadness:
     def __init__(self, root: tk.Tk):
@@ -4831,6 +5044,10 @@ class MarkerMadness:
         # Load persisted preferences before creating BooleanVars so their
         # default values are restored from the last session.
         self._prefs = _load_prefs()
+        # Sticky Batch Stamp settings — dict of the last stamp's field state,
+        # or None on first run. Saved back after every successful stamp.
+        _ss = self._prefs.get("stamp_settings")
+        self._stamp_settings = _ss if isinstance(_ss, dict) else None
 
         self._sort_col     = self._prefs.get("sort_col",     "frame")
         self._sort_reverse = self._prefs.get("sort_reverse", False)
@@ -5697,6 +5914,7 @@ class MarkerMadness:
             "no_prompt_delete":  self._no_prompt_delete_var.get(),
             "import_preview": self._import_preview_var.get(),
             "nudge_skip_confirm":  self._nudge_auto_var.get(),
+            "stamp_settings":   self._stamp_settings,
         }
 
     def _on_close(self):
@@ -7828,24 +8046,52 @@ class MarkerMadness:
         except Exception:
             pass
 
-        dlg = StampTrackDialog(self.root, track_list, timeline=timeline, fps=fps)
+        def _do_stamp(params, persist, live_dlg=None):
+            """Stamp once and save sticky settings. Returns (next_start,
+            summary) for the dialog's stay-open display, or None on failure.
+            live_dlg is the still-open StampTrackDialog in stay-open mode —
+            its presence routes the result into the dialog instead of a
+            popup (a messagebox would land behind the -topmost dialog)."""
+            tl2, err2 = self._fresh_timeline()
+            if not tl2:
+                self._mb(messagebox.showwarning, "Not connected", err2)
+                return None
+            try:
+                next_start, summary = self._stamp_track(
+                    tl2, params, quiet=live_dlg is not None)
+            except Exception as _exc:
+                self._mb(messagebox.showerror, "Stamp Failed",
+                         f"An unexpected error occurred while stamping:\n\n{_exc}")
+                return None
+            self._save_stamp_settings(persist, next_start)
+            return (next_start, summary)
+
+        dlg = StampTrackDialog(self.root, track_list, timeline=timeline, fps=fps,
+                               initial=self._stamp_settings, stamp_cb=_do_stamp)
         self.root.wait_window(dlg)
         if dlg.result is None:
+            return   # cancelled, or every stamp already ran in stay-open mode
+        _do_stamp(dlg.result, dlg.persist)
+
+    def _save_stamp_settings(self, persist, next_start):
+        """Persist the last stamp's field state (sticky settings).
+        Start is kept exactly as typed — re-numbering each scene from the
+        same base is a real workflow; the running sequence is carried
+        separately as ctr_next, which feeds the dialog's "Continue at N"
+        button for the times the user wants to pick up where they left off."""
+        if not persist:
             return
+        prev = self._stamp_settings or {}
+        st = dict(persist)
+        if next_start is not None:
+            st["ctr_next"] = max(0, min(9999, int(next_start)))
+        elif "ctr_next" in prev:
+            st["ctr_next"] = prev["ctr_next"]
+        self._stamp_settings = st
+        self._prefs["stamp_settings"] = st
+        _save_prefs(self._collect_prefs())
 
-        # Re-fetch a fresh timeline proxy after dialog interaction
-        timeline, err = self._fresh_timeline()
-        if not timeline:
-            self._mb(messagebox.showwarning, "Not connected", err)
-            return
-
-        try:
-            self._stamp_track(timeline, dlg.result)
-        except Exception as _exc:
-            self._mb(messagebox.showerror, "Stamp Failed",
-                     f"An unexpected error occurred while stamping:\n\n{_exc}")
-
-    def _stamp_track(self, timeline, params):
+    def _stamp_track(self, timeline, params, quiet=False):
         """Stamp a marker on every clip in the chosen track.
 
         params : (ttype, tidx, color, name, note, duration, offset,
@@ -7853,6 +8099,13 @@ class MarkerMadness:
         range_frames is None (entire track) or (in_frames, out_frames).
         counter_cfg is None, or a dict of digits / start / step / pos — the
         marker name then gets a running number, same as the Marker Renamer.
+
+        Returns (next_start, summary): next_start is the counter value one
+        step past the last number stamped (None when the counter was off or
+        nothing landed); summary is a compact one-line result string.
+        quiet=True skips the completion messagebox — stay-open mode shows
+        the summary inside the Stamp dialog instead, because a messagebox
+        would land behind the dialog's -topmost.
         """
         (ttype, tidx, color, name, note, duration, offset,
          skip_existing, range_frames, counter_cfg) = params
@@ -7863,9 +8116,11 @@ class MarkerMadness:
 
         prefix = "V" if ttype == "video" else "A"
         if not items:
+            if quiet:
+                return None, f"No clips found on track {prefix}{tidx}."
             self._mb(messagebox.showinfo, "No Clips",
                 f"No clips found on track {prefix}{tidx}.")
-            return
+            return None, ""
 
         # ── Detect transitions ────────────────────────────────────────────
         # GetItemListInTrack() returns transition objects (Cross Dissolve,
@@ -8042,7 +8297,22 @@ class MarkerMadness:
             f"Failed:                {failed}"
             f"{diag_line}"
         )
-        self._mb(messagebox.showinfo, "Stamp Complete", msg)
+        # Compact one-liner for the stay-open dialog's summary label
+        short = f"✓ {added} added on {prefix}{tidx}"
+        if counter_cfg and used_names:
+            short += (f"  ·  {used_names[0]} … {used_names[-1]}"
+                      if len(used_names) > 1 else f"  ·  {used_names[0]}")
+        if skipped:
+            short += f"  ·  {skipped} skipped"
+        if out_of_range:
+            short += f"  ·  {out_of_range} outside range"
+        if failed:
+            short += f"  ·  {failed} FAILED"
+        if not quiet:
+            self._mb(messagebox.showinfo, "Stamp Complete", msg)
+        # ctr already sits one step past the last stamped number (it only
+        # advances on success), which is exactly the next scene's Start.
+        return (ctr if (counter_cfg and added) else None), short
 
     # ── Quick Edit Bar ────────────────────────────────────────────────────
 
