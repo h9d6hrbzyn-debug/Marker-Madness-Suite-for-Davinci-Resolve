@@ -22,7 +22,7 @@ WHAT'S INCLUDED
   Timecode calculator and reel timer for editors and DITs.
   Guide: resolve-tools.com/reel-time-plus-guide
 
-  Clipper 1.4.1.py
+  Clipper 1.5.py
   Marker-to-clip tool — turn timeline markers into sub-clips or sequences.
   Guide: resolve-tools.com/clipper-guide
 

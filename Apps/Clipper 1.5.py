@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clipper 1.4.1 — DaVinci Resolve Subclip Generator
+Clipper 1.5 — DaVinci Resolve Subclip Generator
 
 Creates a Media Pool subclip for every clip on a chosen video track
 in the current Resolve timeline. Part of the Marker Madness suite.
@@ -277,12 +277,12 @@ class Clipper:
     def __init__(self, root):
         self.root = root
         self.root.withdraw()
-        self.root.title("Clipper 1.4.1")
+        self.root.title("Clipper 1.5")
         self.root.configure(bg=BG)
         self.root.createcommand('::tk::mac::ShowHelp',
             lambda: webbrowser.open("https://resolve-tools.com/clipper-guide"))
         self.root.resizable(True, True)
-        self.root.minsize(640, 592)   # +32 vs 1.3 — the reel-name row's exact height
+        self.root.minsize(640, 620)   # +28 vs 1.4.1 — the copy-grade row's height
 
         _w, _h = 720, 900
         self.root.update_idletasks()
@@ -326,6 +326,7 @@ class Clipper:
         self._head_handles_var = tk.IntVar(value=int(_p.get("head", 0)))     # custom head
         self._tail_handles_var = tk.IntVar(value=int(_p.get("tail", 0)))     # custom tail
         self._markers_var      = tk.BooleanVar(value=False)  # preserve clip markers
+        self._grade_var        = tk.BooleanVar(value=False)  # copy source grade onto reel clips
         self._marker_name_var  = tk.BooleanVar(value=False)  # name subclips from markers
         self._order_var        = tk.BooleanVar(value=False)  # preserve timeline order prefix
         self._order_mode_var   = tk.StringVar(value="seq")   # "seq" (T01_) | "tc" (timecode)
@@ -471,7 +472,7 @@ class Clipper:
         name_row.pack(fill="x", padx=16, pady=(12, 0))
         tk.Label(name_row, text="✂  Clipper", fg=ACCENT, bg=PANEL,
                  font=("Avenir Next", 18, "bold")).pack(side="left")
-        tk.Label(name_row, text="v1.4.1", fg=DIM, bg=PANEL,
+        tk.Label(name_row, text="v1.5", fg=DIM, bg=PANEL,
                  font=F_SMALL).pack(side="left", padx=(4, 0), pady=(4, 0))
 
         # Float on top checkbox
@@ -792,11 +793,27 @@ class Clipper:
         self._reel_name_entry.pack(side="left")
         tk.Label(opts_frame2c, text="(blank = “<timeline> — <track> REEL”)",
                  fg=DIM, bg=BG, font=F_SMALL).pack(side="left", padx=(10, 0))
+
+        # Copy grade — its own indented row, same reasoning as the reel
+        # name above. Only meaningful when Build reel is on, so it greys
+        # with it. Bypass Color Management is not scriptable and stays a
+        # manual lasso on the finished reel.
+        opts_frame2d = tk.Frame(cf, bg=BG)
+        opts_frame2d.grid(row=15, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        self._grade_cb = tk.Checkbutton(
+            opts_frame2d,
+            text="Copy grade  (carry the source grade onto the reel clips)",
+            variable=self._grade_var,
+            fg=TEXT, bg=BG, activeforeground=TEXT,
+            activebackground=BG, selectcolor=ENTRY_BG,
+            disabledforeground=DIM, font=F_MAIN)
+        self._grade_cb.pack(side="left", padx=(22, 0))
+
         self._on_reel_toggle()   # start greyed — Build reel is off by default
 
-        # Row 15 — completion dialog toggle
+        # Row 16 — completion dialog toggle
         opts_frame3 = tk.Frame(cf, bg=BG)
-        opts_frame3.grid(row=15, column=0, columnspan=3, sticky="w", pady=(2, 6))
+        opts_frame3.grid(row=16, column=0, columnspan=3, sticky="w", pady=(2, 6))
 
         tk.Checkbutton(opts_frame3,
                        text="Show completion summary",
@@ -807,7 +824,7 @@ class Clipper:
 
         # Separator
         tk.Frame(cf, bg=BTN_HOV, height=1).grid(
-            row=16, column=0, columnspan=3, sticky="ew", pady=(0, 0))
+            row=17, column=0, columnspan=3, sticky="ew", pady=(0, 0))
 
     def _build_preview(self):
         pf = tk.Frame(self.root, bg=BG)
@@ -2302,6 +2319,40 @@ class Clipper:
             self._log(f"  ⚠ _copy_markers: {exc}")
             return 0
 
+    def _copy_grade(self, src_item, dst_item):
+        """Copy the colour grade from src_item (the original, graded timeline
+        item) onto dst_item (the compound clip's OUTER item on the reel).
+
+        Outer is deliberate. The grade has to sit on the same layer the user
+        will lasso for Bypass Color Management, so that the reel reproduces
+        the main timeline's stack exactly: clean plate -> compound container
+        -> bypass + grade on one item. Putting it on the inner item instead
+        would leave the plate's input transform baked in underneath.
+
+        Bypass Color Management itself is NOT scriptable — TimelineItem
+        exposes 26 properties and every one is transform/retime. That step
+        stays a manual lasso after the reel is built.
+
+        CopyGrades acts on the current node stack layer. Projects using more
+        than one layer will only carry the active one; nodeStackLayers is 1
+        in normal use.
+
+        Returns True if the grade was copied.
+        """
+        if not src_item or not dst_item:
+            return False
+        try:
+            if not callable(getattr(src_item, "CopyGrades", None)):
+                self._log("    ⚠ grade: CopyGrades unavailable on this Resolve build")
+                return False
+            ok = src_item.CopyGrades([dst_item])
+            if not ok:
+                self._log("    ⚠ grade: CopyGrades returned False")
+            return bool(ok)
+        except Exception as exc:
+            self._log(f"    ⚠ _copy_grade: {exc}")
+            return False
+
     def _create_subclips(self):
         """Create subclips for all clips in the preview (respects Range filter)."""
         if not self._preview_rows:
@@ -2362,8 +2413,9 @@ class Clipper:
     def _on_reel_toggle(self):
         """Grey the reel-name field when Build reel is off — it does nothing then."""
         try:
-            self._reel_name_entry.configure(
-                state="normal" if self._reel_var.get() else "disabled")
+            on = self._reel_var.get()
+            self._reel_name_entry.configure(state="normal" if on else "disabled")
+            self._grade_cb.configure(state="normal" if on else "disabled")
         except Exception:
             pass
 
@@ -2424,6 +2476,7 @@ class Clipper:
 
         added = 0; skipped = 0; failed = 0
         reel_names = []   # successful creations in order, for Build Reel
+        reel_srcs  = {}   # name -> original graded TimelineItem, for grade copy
         errors = []
 
         # ── API probe ─────────────────────────────────────────────────────
@@ -2640,6 +2693,7 @@ class Clipper:
                 if result:
                     added += 1
                     reel_names.append(final_name)
+                    reel_srcs[final_name] = row["item"]
                     if used_fallback:
                         self._log(f"  ✓  {final_name}  (compound clip via fallback)")
                         if do_video_only:
@@ -2746,6 +2800,7 @@ class Clipper:
                 if result:
                     added += 1
                     reel_names.append(final_name)
+                    reel_srcs[final_name] = row["item"]
                     self._log(f"  ✓  {final_name}  (compound clip)")
                     if do_markers:
                         try:
@@ -2789,7 +2844,8 @@ class Clipper:
         # ── Build Reel: assemble the created clips into one sequence ──────
         reel_info = None
         if self._reel_var.get() and reel_names and not self._abort_flag:
-            reel_info = self._build_reel(dest_folder, reel_names, track_lbl)
+            reel_info = self._build_reel(dest_folder, reel_names, track_lbl,
+                                         reel_srcs, self._grade_var.get())
 
         self._end_batch()
 
@@ -2822,7 +2878,8 @@ class Clipper:
         self._log(f"{status_word} ({label}) — {added} added, {skipped} skipped, {failed} failed.")
         self._schedule_preview()
 
-    def _build_reel(self, dest_folder, names, track_lbl):
+    def _build_reel(self, dest_folder, names, track_lbl,
+                    srcs=None, do_grade=False):
         """Assemble the just-created clips / sub-sequences into ONE reel
         timeline, in creation order, by appending their media pool items.
         Works for both native subclips and per-clip timelines (timelines are
@@ -2930,7 +2987,20 @@ class Clipper:
             except Exception:
                 return None
 
+        def _newest_reel_item():
+            """The item just appended — appends land at the end, so the
+            highest start frame on any video track is the new one."""
+            try:
+                items = []
+                for vi in range(1, int(reel.GetTrackCount("video") or 0) + 1):
+                    items += list(reel.GetItemListInTrack("video", vi) or [])
+                return max(items, key=lambda it: int(it.GetStart())) if items else None
+            except Exception as exc:
+                self._log(f"    ⚠ grade: could not locate new reel item: {exc}")
+                return None
+
         placed = 0
+        graded = 0
         before = _vcount()
         for i, (nm, mpi) in enumerate(ordered):
             # Appending a TIMELINE into a timeline doesn't advance the insert
@@ -2966,6 +3036,15 @@ class Clipper:
                 if ok:
                     placed += 1
                     before = now
+                    if do_grade and srcs:
+                        src = srcs.get(nm)
+                        if src:
+                            dst = _newest_reel_item()
+                            if dst and self._copy_grade(src, dst):
+                                graded += 1
+                                self._log(f"    grade copied onto '{nm}'")
+                        else:
+                            self._log(f"    ⚠ grade: no source item for '{nm}'")
                     break
             self.root.update()
             if self._abort_flag:
@@ -2985,6 +3064,9 @@ class Clipper:
                 pass
 
         self._log(f"✓  Reel '{reel_name}' — {placed} of {len(ordered)} clip(s) placed")
+        if do_grade:
+            self._log(f"   {graded} grade(s) copied. Next: lasso the reel "
+                      f"clips and apply Bypass Color Management to match.")
         return (reel_name, placed, len(ordered))
 
     # ── Handles helpers ───────────────────────────────────────────────────

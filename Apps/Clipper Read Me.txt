@@ -1,4 +1,4 @@
-Clipper v1.4.1
+Clipper v1.5
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -8,6 +8,18 @@ Clipper turns your timeline markers into individual sub-clips or complete
 sequences in one click. Set in/out points with a marker pair, name your
 destination bin, and Clipper does the rest — with optional handle padding,
 timeline ordering prefixes, and multi-track support.
+
+WHAT'S NEW IN 1.5
+- Copy grade — Build reel gained a "Copy grade" checkbox (enabled only
+  when Build reel is on) that carries each source clip's colour grade
+  onto its outer item on the finished reel, using Resolve's CopyGrades
+  API. The grade lands on the same layer you'd lasso for Bypass Color
+  Management, so the reel reproduces the main timeline's stack exactly:
+  clean plate, compound container, grade and bypass together on the
+  outer item. Bypass Color Management itself has no scripting API, so
+  that step stays a manual lasso after the reel is built — the
+  completion log reports how many grades copied and reminds you to
+  apply it.
 
 WHAT'S NEW IN 1.4.1
 - One window only — launching it again brings the window already open
@@ -34,7 +46,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Clipper 1.4.1.py" to:
+1. Copy "Clipper 1.5.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -44,7 +56,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Clipper 1.4.1
+   Workspace → Scripts → Utility → Clipper 1.5
 
 FULL DOCUMENTATION
    resolve-tools.com/clipper-guide
