@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clip Renamer Pro 2.2.2 — DaVinci Resolve Clip & Timeline Renamer
+Clip Renamer Pro 2.2.3 — DaVinci Resolve Clip & Timeline Renamer
 
 Renames clips and/or timelines selected in the Resolve Media Pool bin.
 Part of the Marker Madness suite.
@@ -349,6 +349,10 @@ def apply_transform(text, *, find="", replace="", add="", add_pos="After",
             n = n + cs
             if add_pos == "After counter" and add:
                 n = n + add
+    elif not counter_enabled and not replace_all and add_pos == "After counter" and add:
+        # Counter switched off: "After counter" has nowhere to anchor to, so
+        # it degrades to "After" rather than silently dropping Add.
+        n = n + add
     # Version tag is always last — after the counter and after anything the
     # "After counter" option appended. A version suffix that isn't at the very
     # end of the name isn't a version suffix.
@@ -432,7 +436,7 @@ class ClipRenamerPro:
         _tb.pack(fill="x")
         tk.Label(_tb, text="  Clip Renamer Pro", fg=ACCENT, bg=TITLE_BG,
                  font=("Avenir Next", 18)).pack(side="left")
-        tk.Label(_tb, text="v2.2.2", fg=DIM, bg=TITLE_BG,
+        tk.Label(_tb, text="v2.2.3", fg=DIM, bg=TITLE_BG,
                  font=("Avenir Next", 10)).pack(side="left", pady=(6, 0))
         _info = tk.Frame(_tb, bg=TITLE_BG)
         _info.pack(side="right", padx=12)
@@ -658,6 +662,11 @@ class ClipRenamerPro:
                                      highlightthickness=1, highlightbackground="#444444",
                                      highlightcolor="#666666")
         self._preview_text.pack(fill="both", expand=True)
+        # "collision" = would duplicate another name; "skipped" = apply will
+        # leave this row untouched (e.g. a timeline whose Resolve object is
+        # missing) - preview and apply must always agree on which rows these are.
+        self._preview_text.tag_configure("collision", foreground=RED)
+        self._preview_text.tag_configure("skipped",   foreground=DIM)
 
         # Status bar
         self._status_var = tk.StringVar(
@@ -797,6 +806,79 @@ class ClipRenamerPro:
                 result["clips"].append({"name": nm, "obj": item})
         return result
 
+    def _external_name_sets(self, sel):
+        """Names already in use by something NOT part of this rename - same
+        kind only (a clip name never collides with a timeline name here)."""
+        selected_clip_ids = {id(it["obj"]) for it in sel["clips"]}
+        selected_tl_ids    = {id(it["obj"]) for it in sel["timelines"] if it["obj"] is not None}
+
+        clip_names = set()
+        try:
+            folder = self._media_pool.GetCurrentFolder() if self._media_pool else None
+            if folder:
+                for clip in (folder.GetClipList() or []):
+                    if id(clip) in selected_clip_ids:
+                        continue
+                    props = clip.GetClipProperty() or {}
+                    clip_names.add(props.get("Clip Name", "") or clip.GetName() or "")
+        except Exception:
+            pass
+
+        tl_names = set()
+        try:
+            if self._project:
+                tl_count = self._project.GetTimelineCount()
+                for i in range(1, tl_count + 1):
+                    tl = self._project.GetTimelineByIndex(i)
+                    if tl and id(tl) not in selected_tl_ids:
+                        tl_names.add(tl.GetName())
+        except Exception:
+            pass
+
+        return clip_names, tl_names
+
+    def _build_preview_rows(self):
+        """Every selected item's (kind, old, new, skipped, collision) - same
+        order and counter logic _do_rename uses, so preview and apply always
+        agree row for row. A timeline row with no Resolve object mirrors what
+        apply already does with it: unchanged name, no counter advance, not
+        counted - never treated as if it were about to be renamed."""
+        sel     = self._get_selected()
+        step    = self._ctr_step_var.get()
+        counter = self._ctr_start_var.get()   # Start IS the first number
+        rows = []
+
+        for it in sel["clips"]:
+            new = apply_transform(it["name"], **self._get_params(counter))
+            if self._counter_var.get():
+                counter += step
+            rows.append({"kind": "clip", "old": it["name"], "new": new, "skipped": False})
+
+        for it in sel["timelines"]:
+            if it["obj"] is None:
+                rows.append({"kind": "timeline", "old": it["name"], "new": it["name"], "skipped": True})
+                continue
+            new = apply_transform(it["name"], **self._get_params(counter))
+            if self._counter_var.get():
+                counter += step
+            rows.append({"kind": "timeline", "old": it["name"], "new": new, "skipped": False})
+
+        ext_clip_names, ext_tl_names = self._external_name_sets(sel)
+        counts = {}
+        for r in rows:
+            if r["skipped"]:
+                continue
+            key = (r["kind"], r["new"])
+            counts[key] = counts.get(key, 0) + 1
+        for r in rows:
+            if r["skipped"]:
+                r["collision"] = False
+                continue
+            key      = (r["kind"], r["new"])
+            existing = ext_clip_names if r["kind"] == "clip" else ext_tl_names
+            r["collision"] = counts[key] > 1 or r["new"] in existing
+
+        return rows, sel
 
     def _set_text(self, widget, text):
         widget.config(state="normal")
@@ -820,7 +902,7 @@ class ClipRenamerPro:
             pass
 
     def _render_preview(self):
-        sel   = self._get_selected()
+        rows, sel = self._build_preview_rows()
         total = len(sel["clips"]) + len(sel["timelines"])
 
         if total == 0:
@@ -830,29 +912,32 @@ class ClipRenamerPro:
                 "Select items in the bin, then choose an action below.")
             return
 
-        step      = self._ctr_step_var.get()
-        counter   = self._ctr_start_var.get()   # Start IS the first number
-        sel_lines = []
-        prv_lines = []
-
-        for it in sel["clips"]:
-            new = apply_transform(it["name"], **self._get_params(counter))
-            if self._counter_var.get():
-                counter += step
-            sel_lines.append(f"[clip]      {it['name']}")
-            prv_lines.append(f"[clip]      {new}")
-
-        for it in sel["timelines"]:
-            new = apply_transform(it["name"], **self._get_params(counter))
-            if self._counter_var.get():
-                counter += step
-            sel_lines.append(f"[timeline]  {it['name']}")
-            prv_lines.append(f"[timeline]  {new}")
-
+        sel_lines = [f"[clip]      {it['name']}" for it in sel["clips"]]
+        sel_lines += [f"[timeline]  {it['name']}" for it in sel["timelines"]]
         self._set_text(self._selected_text, "\n".join(sel_lines))
-        self._set_text(self._preview_text,  "\n".join(prv_lines))
-        self._status_var.set(
-            f"{len(sel['clips'])} clip(s), {len(sel['timelines'])} timeline(s) selected")
+        self._set_preview_rows(rows)
+
+        n_collisions = sum(1 for r in rows if r["collision"])
+        status = f"{len(sel['clips'])} clip(s), {len(sel['timelines'])} timeline(s) selected"
+        if n_collisions:
+            status += f"  -  {n_collisions} duplicate name(s) in red"
+        self._status_var.set(status)
+
+    def _set_preview_rows(self, rows):
+        """Render the RENAME PREVIEW text with per-row colour: red for a name
+        that would collide, dim for a row apply will leave untouched."""
+        prefixes = {"clip": "[clip]      ", "timeline": "[timeline]  "}
+        lines = [f"{prefixes[r['kind']]}{r['new']}" for r in rows]
+        self._set_text(self._preview_text, "\n".join(lines))
+
+        w = self._preview_text
+        w.config(state="normal")
+        for i, r in enumerate(rows):
+            if r["skipped"]:
+                w.tag_add("skipped", f"{i + 1}.0", f"{i + 1}.end")
+            elif r["collision"]:
+                w.tag_add("collision", f"{i + 1}.0", f"{i + 1}.end")
+        w.config(state="disabled")
 
     def _initial_lift(self):
         self.root.deiconify()
@@ -914,8 +999,61 @@ class ClipRenamerPro:
 
     # ── Actions ───────────────────────────────────────────────────────────
 
+    def _confirm_duplicate_rename(self, n):
+        """One confirmation before a rename that would create duplicate
+        names. Warns, does not block - Rename proceeds if the user confirms.
+        Sized to its own content (measured, not hardcoded) and centred over
+        the main window; buttons are TBtn, so ink follows the suite rule."""
+        result = {"go": False}
+        noun = "name" if n == 1 else "names"
+
+        dlg = tk.Toplevel(self.root)
+        dlg.withdraw()
+        dlg.title("Duplicate Names")
+        dlg.configure(bg=PANEL)
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+
+        tk.Label(dlg, text=f"{n} {noun} would be duplicated. Rename anyway?",
+                 fg=TEXT, bg=PANEL, font=F_MAIN, justify="left",
+                 wraplength=320).pack(padx=20, pady=(20, 14))
+
+        btns = tk.Frame(dlg, bg=PANEL)
+        btns.pack(padx=20, pady=(0, 20))
+
+        def _cancel():
+            result["go"] = False
+            dlg.destroy()
+
+        def _go():
+            result["go"] = True
+            dlg.destroy()
+
+        TBtn(btns, text="Cancel", bg=BTN, command=_cancel).pack(side="left", padx=(0, 8))
+        TBtn(btns, text="Rename", bg=RED, command=_go).pack(side="left")
+        dlg.protocol("WM_DELETE_WINDOW", _cancel)
+
+        dlg.update_idletasks()
+        w = dlg.winfo_reqwidth()
+        h = dlg.winfo_reqheight()
+        rx, ry = self.root.winfo_rootx(), self.root.winfo_rooty()
+        rw, rh = self.root.winfo_width(), self.root.winfo_height()
+        dlg.geometry(f"{w}x{h}+{rx + (rw - w) // 2}+{ry + (rh - h) // 2}")
+        dlg.deiconify()
+        dlg.grab_set()
+        dlg.focus_set()
+        self.root.wait_window(dlg)
+        return result["go"]
+
     def _do_rename(self, filter_type):
-        sel     = self._get_selected()
+        rows, sel = self._build_preview_rows()
+        kinds = {"clips": ("clip",), "timelines": ("timeline",),
+                 "all": ("clip", "timeline")}[filter_type]
+        n_collisions = sum(1 for r in rows
+                           if r["kind"] in kinds and not r["skipped"] and r["collision"])
+        if n_collisions and not self._confirm_duplicate_rename(n_collisions):
+            self._status_var.set("Rename cancelled - duplicate names.")
+            return
         try:
             step    = self._ctr_step_var.get()
             counter = self._ctr_start_var.get()  # Start IS the first number

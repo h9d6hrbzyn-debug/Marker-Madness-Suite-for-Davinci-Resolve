@@ -10,7 +10,7 @@ WHAT'S INCLUDED
   export, and exchange markers with Premiere Pro and Avid.
   Guide: resolve-tools.com/marker-madness-guide
 
-  Clip Renamer Pro 2.2.2.py
+  Clip Renamer Pro 2.2.3.py
   Bulk clip renamer — build names from tokens, preview before committing.
   Guide: resolve-tools.com/clip-renamer-pro-guide
 
