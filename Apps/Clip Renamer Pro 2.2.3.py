@@ -349,9 +349,10 @@ def apply_transform(text, *, find="", replace="", add="", add_pos="After",
             n = n + cs
             if add_pos == "After counter" and add:
                 n = n + add
-    elif not counter_enabled and not replace_all and add_pos == "After counter" and add:
-        # Counter switched off: "After counter" has nowhere to anchor to, so
-        # it degrades to "After" rather than silently dropping Add.
+    elif not replace_all and add_pos == "After counter" and add:
+        # No counter in the name (switched off, or Digits is 0): "After counter"
+        # has nowhere to anchor to, so Add goes on the end rather than being
+        # silently dropped.
         n = n + add
     # Version tag is always last — after the counter and after anything the
     # "After counter" option appended. A version suffix that isn't at the very

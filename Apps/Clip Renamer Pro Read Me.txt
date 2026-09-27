@@ -19,9 +19,9 @@ WHAT'S NEW IN 2.2.3
   the preview and then get silently skipped when you hit Rename. It now
   previews exactly as it will behave: shown dimmed, name unchanged, not
   counted.
-- Fixed: with "After counter" selected but the Counter switched off, the
-  Add text was being dropped entirely. It now lands after the name, the
-  same as if you'd chosen "After".
+- Fixed: with "After counter" selected but the Counter switched off, or
+  its Digits set to 0, the Add text was being dropped entirely. It now
+  lands on the end of the name.
 
 WHAT'S NEW IN 2.2.2
 - One window only — launching it again brings the window already open

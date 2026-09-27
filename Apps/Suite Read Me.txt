@@ -14,7 +14,7 @@ WHAT'S INCLUDED
   Bulk clip renamer — build names from tokens, preview before committing.
   Guide: resolve-tools.com/clip-renamer-pro-guide
 
-  Track Command 1.2.1.py
+  Track Command 1.2.2.py
   Track manager — rename, reorder, add, delete, and toggle track visibility.
   Guide: resolve-tools.com/track-command-guide
 

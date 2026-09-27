@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Track Command 1.2.1 — DaVinci Resolve Track Manager
+Track Command 1.2.2 — DaVinci Resolve Track Manager
 
 Renames audio and video tracks in the current Resolve timeline.
 Part of the Marker Madness suite.
@@ -240,6 +240,38 @@ def audio_type_string(main_type, sub_type):
         return main_type.lower()
 
 # ---------------------------------------------------------------------------
+# Load-file audio subtype matching (1.2.2): a saved tracks file's audio line
+# is "<name> <subType>", but a subType containing its own space ("5.0 Film",
+# "7.1 Film") isn't caught by splitting on the LAST space alone — that used
+# to grab only "Film" off the end, which isn't a valid subtype, so the whole
+# line fell back to name-as-is with subType "mono". Match the END of the
+# line against every valid subtype instead, longest candidate first, so a
+# multi-word subtype is recognised before a shorter one that could
+# otherwise be mistaken for its tail.
+# ---------------------------------------------------------------------------
+
+_VALID_LOAD_SUBTYPES = {
+    "mono", "stereo",
+    "lrc", "lcr", "lrcs", "lcrs", "quad",
+    "5.0", "5.1", "7.0", "7.1",
+    "5.0 film", "5.1 film", "7.0 film", "7.1 film",
+    *[f"adaptive{i}" for i in range(1, 37)],
+}
+_VALID_LOAD_SUBTYPES_BY_LENGTH = sorted(_VALID_LOAD_SUBTYPES, key=len, reverse=True)
+
+def _split_audio_line(line):
+    """Return (name, subType) using the line's own casing, or None if no
+    valid subtype matches the end of the line (same as the old rsplit's
+    "no space at all in the line" miss case)."""
+    lowered = line.lower()
+    for candidate in _VALID_LOAD_SUBTYPES_BY_LENGTH:
+        suffix = " " + candidate
+        if lowered.endswith(suffix):
+            cut = len(line) - len(candidate)
+            return line[:cut - 1], line[cut:]
+    return None
+
+# ---------------------------------------------------------------------------
 # Hover color helper
 # ---------------------------------------------------------------------------
 
@@ -389,7 +421,7 @@ class LoadPreviewWindow(tk.Toplevel):
                 lb.insert("end", " " + track["name"] + sub)
             self._boxes[key] = lb
 
-        tk.Label(self, text="Select rows to load only those tracks  ·  nothing selected = load all",
+        tk.Label(self, text="Select rows to load only those tracks  ·  nothing selected in a column = load all of that column",
                  fg=DIM, bg=BG, font=F_SMALL).pack(fill="x", pady=(0, 4))
 
         bf = tk.Frame(self, bg=BG)
@@ -406,17 +438,17 @@ class LoadPreviewWindow(tk.Toplevel):
                  ).pack(side="left", fill="x", expand=True, padx=2)
 
     def _go(self, mode):
-        # Selection filters what gets loaded: any selected rows → exactly
-        # those tracks; no selection anywhere → everything (old behavior).
-        picked  = {"video": [], "audio": []}
-        any_sel = False
+        # Selection filters what gets loaded, PER COLUMN: a column with
+        # selected rows loads only those; a column with no selection of its
+        # own loads all of that column's rows. (Previously a selection in
+        # either column collapsed the OTHER column to empty when it had no
+        # selection of its own.)
+        picked = {}
         for key, lb in self._boxes.items():
             sel = lb.curselection()
-            if sel:
-                any_sel = True
-                picked[key] = [self._loaded[key][i] for i in sel]
-        payload = picked if any_sel else self._loaded
-        self._apply_cb(payload, mode, self._filename)
+            picked[key] = ([self._loaded[key][i] for i in sel]
+                           if sel else list(self._loaded[key]))
+        self._apply_cb(picked, mode, self._filename)
         self.destroy()
 
 # ---------------------------------------------------------------------------
@@ -428,7 +460,7 @@ class TrackCommander:
     def __init__(self, root):
         self.root = root
         self.root.withdraw()
-        self.root.title("Track Command 1.2.1")
+        self.root.title("Track Command 1.2.2")
         self.root.configure(bg=BG)
         self.root.createcommand('::tk::mac::ShowHelp',
             lambda: webbrowser.open("https://resolve-tools.com/track-command-guide"))
@@ -577,7 +609,7 @@ class TrackCommander:
         _tb.pack(fill="x")
         tk.Label(_tb, text="  Track Command", fg=ACCENT, bg=TITLE_BG,
                  font=("Avenir Next", 18)).pack(side="left")
-        tk.Label(_tb, text="v1.2.1", fg=DIM, bg=TITLE_BG,
+        tk.Label(_tb, text="v1.2.2", fg=DIM, bg=TITLE_BG,
                  font=("Avenir Next", 10)).pack(side="left", pady=(6, 0))
         _info = tk.Frame(_tb, bg=TITLE_BG)
         _info.pack(side="left", padx=24)
@@ -1060,7 +1092,7 @@ class TrackCommander:
     def _update_preview(self):
         self._preview_job = None
         step       = self._ctr_step_var.get()
-        counter    = self._ctr_start_var.get() * step
+        counter    = self._ctr_start_var.get()
         a_selected = set(self._audio_tree.selection())
         v_selected = set(self._video_tree.selection())
 
@@ -1189,7 +1221,7 @@ class TrackCommander:
         if not self._timeline:
             return
         step       = self._ctr_step_var.get()
-        counter    = self._ctr_start_var.get() * step
+        counter    = self._ctr_start_var.get()
         changed = 0
         changes = []
         a_selected = set(self._audio_tree.selection())
@@ -1297,12 +1329,12 @@ class TrackCommander:
             self._read_tracks(); deleted += 1
         for t in self._tracks["audio"]:
             sn = self._start_names.get(t["id"])
-            if sn and t["name"] != sn:
+            if sn is not None and t["name"] != sn:
                 self._timeline.SetTrackName("audio", t["index"], sn)
                 self._orig_names[t["id"]] = sn; t["name"] = sn; restored += 1
         for t in self._tracks["video"]:
             sn = self._start_names.get(t["id"])
-            if sn and t["name"] != sn:
+            if sn is not None and t["name"] != sn:
                 self._timeline.SetTrackName("video", t["index"], sn)
                 self._orig_names[t["id"]] = sn; t["name"] = sn; restored += 1
         self._undo_stack = []
@@ -1491,12 +1523,6 @@ class TrackCommander:
             return
         loaded  = {"video": [], "audio": []}
         section = None
-        valid = {
-            "mono", "stereo",
-            "lrc", "lcr", "lrcs", "lcrs", "quad",
-            "5.0", "5.1", "7.0", "7.1",
-            *[f"adaptive{i}" for i in range(1, 37)],
-        }
         try:
             with open(fp, "r", encoding="utf-8") as fh:
                 for line in fh:
@@ -1509,10 +1535,11 @@ class TrackCommander:
                         if section == "video":
                             loaded["video"].append({"name": line})
                         elif section == "audio":
-                            parts = line.rsplit(" ", 1)
-                            if len(parts) == 2 and parts[1].lower() in valid:
+                            match = _split_audio_line(line)
+                            if match is not None:
+                                name, sub_type = match
                                 loaded["audio"].append(
-                                    {"name": parts[0], "subType": parts[1]})
+                                    {"name": name, "subType": sub_type})
                             else:
                                 loaded["audio"].append(
                                     {"name": line, "subType": "mono"})
@@ -1554,6 +1581,7 @@ class TrackCommander:
                     tid = self._tid("video", idx)
                     self._orig_names[tid] = lt["name"]
                     self._tracks["video"].append({"index": idx, "name": lt["name"], "id": tid})
+                    changes.append({"type": "video", "index": idx, "action": "added"})
                     added += 1
         for i, lt in enumerate(loaded["audio"]):
             if i < len(self._tracks["audio"]):
@@ -1572,6 +1600,7 @@ class TrackCommander:
                     self._orig_names[tid] = lt["name"]
                     self._tracks["audio"].append(
                         {"index": idx, "name": lt["name"], "subType": sub, "id": tid})
+                    changes.append({"type": "audio", "index": idx, "action": "added"})
                     added += 1
         self._populate_audio_tree()
         self._populate_video_tree()
