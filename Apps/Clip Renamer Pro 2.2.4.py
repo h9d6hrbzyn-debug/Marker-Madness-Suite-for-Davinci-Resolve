@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clip Renamer Pro 2.2.3 — DaVinci Resolve Clip & Timeline Renamer
+Clip Renamer Pro 2.2.4 — DaVinci Resolve Clip & Timeline Renamer
 
 Renames clips and/or timelines selected in the Resolve Media Pool bin.
 Part of the Marker Madness suite.
@@ -344,7 +344,12 @@ def apply_transform(text, *, find="", replace="", add="", add_pos="After",
     if counter_enabled and counter_digits > 0:
         cs = str(counter).zfill(counter_digits)
         if counter_pos == "Before":
-            n = cs + n
+            # "After counter" means literally after the counter, wherever
+            # the counter sits. Counter in front -> counter, Add, name.
+            if add_pos == "After counter" and add and not replace_all:
+                n = cs + add + n
+            else:
+                n = cs + n
         else:
             n = n + cs
             if add_pos == "After counter" and add:
@@ -437,7 +442,7 @@ class ClipRenamerPro:
         _tb.pack(fill="x")
         tk.Label(_tb, text="  Clip Renamer Pro", fg=ACCENT, bg=TITLE_BG,
                  font=("Avenir Next", 18)).pack(side="left")
-        tk.Label(_tb, text="v2.2.3", fg=DIM, bg=TITLE_BG,
+        tk.Label(_tb, text="v2.2.4", fg=DIM, bg=TITLE_BG,
                  font=("Avenir Next", 10)).pack(side="left", pady=(6, 0))
         _info = tk.Frame(_tb, bg=TITLE_BG)
         _info.pack(side="right", padx=12)
