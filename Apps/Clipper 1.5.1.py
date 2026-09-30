@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clipper 1.5 — DaVinci Resolve Subclip Generator
+Clipper 1.5.1 — DaVinci Resolve Subclip Generator
 
 Creates a Media Pool subclip for every clip on a chosen video track
 in the current Resolve timeline. Part of the Marker Madness suite.
@@ -277,7 +277,7 @@ class Clipper:
     def __init__(self, root):
         self.root = root
         self.root.withdraw()
-        self.root.title("Clipper 1.5")
+        self.root.title("Clipper 1.5.1")
         self.root.configure(bg=BG)
         self.root.createcommand('::tk::mac::ShowHelp',
             lambda: webbrowser.open("https://resolve-tools.com/clipper-guide"))
@@ -344,6 +344,15 @@ class Clipper:
         self._focus_refresh_job = None    # debounce handle for focus-in auto-refresh
         self._last_tl_name      = self._tl_name()  # track name for poll comparison
         self._abort_flag        = False   # set True to stop the current batch
+
+        # ── Audio-strip safety guard (1.5.1) ────────────────────────────────
+        # See _record_run_origin / _strip_audio_tracks_guarded. Defaults here
+        # only guard against a guarded-strip call happening before any run
+        # has recorded an origin (should never happen, but fail closed).
+        self._run_orig_tl_uid          = None
+        self._run_orig_tl_audio_count  = None
+        self._run_created_tl_ids       = set()
+        self._run_audio_safety_tripped = False
 
         self._build_ui()
         self._on_stay_on_top()
@@ -472,7 +481,7 @@ class Clipper:
         name_row.pack(fill="x", padx=16, pady=(12, 0))
         tk.Label(name_row, text="✂  Clipper", fg=ACCENT, bg=PANEL,
                  font=("Avenir Next", 18, "bold")).pack(side="left")
-        tk.Label(name_row, text="v1.5", fg=DIM, bg=PANEL,
+        tk.Label(name_row, text="v1.5.1", fg=DIM, bg=PANEL,
                  font=F_SMALL).pack(side="left", padx=(4, 0), pady=(4, 0))
 
         # Float on top checkbox
@@ -1911,6 +1920,7 @@ class Clipper:
             _orig_tl = self._project.GetCurrentTimeline()
         except Exception:
             pass
+        self._record_run_origin(_orig_tl)
 
         # Set destination bin as current so the new timeline lands there
         try:
@@ -2030,6 +2040,10 @@ class Clipper:
                 parent=self.root)
             self._schedule_preview()
             return
+
+        # new_tl was verifiably created by THIS run — the audio-strip guard
+        # will only ever act on a timeline registered here.
+        self._register_run_created_tl(new_tl)
 
         copy_markers = self._markers_var.get()
         if copy_markers and one_shot_ok:
@@ -2211,8 +2225,17 @@ class Clipper:
 
         # Strip audio tracks if Video only is enabled
         if self._video_only_var.get():
-            n_audio = self._strip_audio_tracks(new_tl)
+            n_audio = self._strip_audio_tracks_guarded(new_tl, context="Clip from Range")
             self._log(f"  Video only — removed {n_audio} audio track(s)")
+            if self._run_audio_safety_tripped:
+                if _orig_tl:
+                    try:
+                        self._project.SetCurrentTimeline(_orig_tl)
+                    except Exception:
+                        pass
+                self._end_batch()
+                self._schedule_preview()
+                return
 
         # Restore original timeline
         if _orig_tl:
@@ -2246,6 +2269,161 @@ class Clipper:
                 parent=self.root)
 
         self._schedule_preview()
+
+    # ── Audio-strip safety guard (1.5.1) ────────────────────────────────────
+    # Robert reported that "Video only" once stripped audio tracks from the
+    # MAIN/original sequence instead of the reel Clipper was building. Root
+    # cause unproven — the fix makes it structurally impossible regardless
+    # of cause: a strip is refused unless the target is verified, by unique
+    # id, to be a timeline THIS run created, is not the original, and is
+    # Resolve's actual current timeline; and every strip is followed by a
+    # fresh re-check that the original timeline's own audio-track count
+    # hasn't moved.
+
+    def _record_run_origin(self, orig_tl):
+        """Snapshot the run's original timeline identity (unique id + audio
+        track count) and reset the set of timelines this run has created.
+        Call once, at the true top of each top-level operation (Clip from
+        Range, Batch), right where that operation captures its _orig_tl."""
+        uid   = None
+        count = None
+        try:
+            uid = orig_tl.GetUniqueId() if orig_tl else None
+        except Exception:
+            uid = None
+        if uid is not None:
+            try:
+                count = int(orig_tl.GetTrackCount("audio") or 0)
+            except Exception:
+                count = None
+        self._run_orig_tl_uid          = uid
+        self._run_orig_tl_audio_count  = count
+        self._run_created_tl_ids       = set()
+        self._run_audio_safety_tripped = False
+        self._log(f"  [safety] run origin recorded: uid={uid!r} "
+                  f"audio_tracks={count!r}")
+
+    def _register_run_created_tl(self, tl):
+        """Record that THIS run created `tl`, by unique id — the audio-strip
+        guard will only ever delete tracks from a timeline in this set."""
+        try:
+            uid = tl.GetUniqueId() if tl else None
+        except Exception:
+            uid = None
+        if uid is not None:
+            self._run_created_tl_ids.add(uid)
+
+    def _find_timeline_by_uid(self, uid):
+        """Fetch a timeline fresh from the project by GetUniqueId() — never
+        reuse a possibly-stale object reference for the safety check."""
+        if uid is None or not self._project:
+            return None
+        try:
+            count = int(self._project.GetTimelineCount() or 0)
+        except Exception:
+            return None
+        for i in range(1, count + 1):
+            try:
+                tl = self._project.GetTimelineByIndex(i)
+                if tl and tl.GetUniqueId() == uid:
+                    return tl
+            except Exception:
+                continue
+        return None
+
+    def _verify_original_audio_safety(self, context=""):
+        """After any audio strip, re-read the ORIGINAL timeline's audio
+        track count fresh (by unique id, not the possibly-stale _orig_tl
+        object). If it dropped, trip the safety flag, log it plainly, and
+        show a messagebox telling the user to undo in Resolve right now."""
+        orig_uid = self._run_orig_tl_uid
+        before   = self._run_orig_tl_audio_count
+        if orig_uid is None or before is None:
+            return
+        fresh = self._find_timeline_by_uid(orig_uid)
+        if fresh is None:
+            self._log("  ⚠ [safety] could not re-locate the original timeline "
+                      "by id to verify it — skipping this check")
+            return
+        try:
+            now = int(fresh.GetTrackCount("audio") or 0)
+        except Exception as exc:
+            self._log(f"  ⚠ [safety] could not read original timeline's audio "
+                      f"track count ({exc}) — skipping this check")
+            return
+        if now < before:
+            self._run_audio_safety_tripped = True
+            msg = (
+                "SAFETY STOP — the ORIGINAL timeline just lost audio track(s).\n\n"
+                f"Had {before} audio track(s), now has {now}.\n\n"
+                "Press Cmd-Z in Resolve NOW to undo, then check your timeline.\n\n"
+                f"(Clipper step: {context or 'audio strip'})"
+            )
+            self._log(f"  ⛔⛔⛔ [safety] {msg}")
+            try:
+                messagebox.showerror("Clipper — Safety Stop", msg, parent=self.root)
+            except Exception:
+                pass
+
+    def _strip_audio_tracks_guarded(self, tl, context=""):
+        """Guarded wrapper around _strip_audio_tracks. Refuses to delete
+        (logs a clear warning, skips, run carries on) unless ALL hold:
+          - the target timeline object is not None
+          - its GetUniqueId() differs from the run's original timeline
+          - it's a timeline THIS RUN created (unique id in _run_created_tl_ids)
+          - it's the project's CURRENT timeline (re-verified by unique id;
+            one SetCurrentTimeline retry is allowed)
+        After a strip that proceeds, re-verifies the original timeline's
+        audio track count hasn't dropped (see _verify_original_audio_safety).
+        Returns the number of audio tracks removed (0 if refused)."""
+        tag = f" ({context})" if context else ""
+
+        if tl is None:
+            self._log(f"  ⚠ [safety] audio-strip guard{tag}: target is None — skipped")
+            return 0
+
+        try:
+            target_uid = tl.GetUniqueId()
+        except Exception as exc:
+            self._log(f"  ⚠ [safety] audio-strip guard{tag}: could not read target "
+                      f"unique id ({exc}) — refusing to strip, skipped")
+            return 0
+
+        if self._run_orig_tl_uid is not None and target_uid == self._run_orig_tl_uid:
+            self._log(f"  ⛔ [safety] audio-strip guard{tag}: target IS the "
+                      "ORIGINAL timeline — refusing to strip, skipped")
+            return 0
+
+        if target_uid not in self._run_created_tl_ids:
+            self._log(f"  ⛔ [safety] audio-strip guard{tag}: target was not "
+                      "created by this run — refusing to strip, skipped")
+            return 0
+
+        try:
+            cur     = self._project.GetCurrentTimeline()
+            cur_uid = cur.GetUniqueId() if cur else None
+        except Exception:
+            cur_uid = None
+        if cur_uid != target_uid:
+            # One retry: try switching to the verified target, then re-check.
+            try:
+                self._project.SetCurrentTimeline(tl)
+            except Exception:
+                pass
+            try:
+                cur     = self._project.GetCurrentTimeline()
+                cur_uid = cur.GetUniqueId() if cur else None
+            except Exception:
+                cur_uid = None
+        if cur_uid != target_uid:
+            self._log(f"  ⛔ [safety] audio-strip guard{tag}: target is not "
+                      "Resolve's current timeline (even after a switch retry) "
+                      "— refusing to strip, skipped")
+            return 0
+
+        removed = self._strip_audio_tracks(tl)
+        self._verify_original_audio_safety(context)
+        return removed
 
     def _strip_audio_tracks(self, tl):
         """Delete all audio tracks from a timeline.
@@ -2472,6 +2650,16 @@ class Clipper:
             track_lbl = f"{tpfx}{tidx}"
         bin_name = self._bin_var.get()
 
+        # Record the ORIGINAL timeline's identity for this whole batch (both
+        # PATH A and PATH B below, plus Build Reel) — the audio-strip safety
+        # guard uses this to refuse a strip aimed at it.
+        _run_orig_tl = None
+        try:
+            _run_orig_tl = self._project.GetCurrentTimeline()
+        except Exception:
+            pass
+        self._record_run_origin(_run_orig_tl)
+
         self._start_batch()
 
         added = 0; skipped = 0; failed = 0
@@ -2696,9 +2884,15 @@ class Clipper:
                     reel_srcs[final_name] = row["item"]
                     if used_fallback:
                         self._log(f"  ✓  {final_name}  (compound clip via fallback)")
+                        # result was created by THIS run via the PATH B fallback —
+                        # register it before any guarded strip.
+                        self._register_run_created_tl(result)
                         if do_video_only:
-                            n_audio = self._strip_audio_tracks(result)
+                            n_audio = self._strip_audio_tracks_guarded(
+                                result, context=f"PATH A fallback '{final_name}'")
                             self._log(f"    Video only — removed {n_audio} audio track(s)")
+                            if self._run_audio_safety_tripped:
+                                self._abort_flag = True
                         if do_markers:
                             try:
                                 row_tt = row.get("ttype", ttype) or "video"
@@ -2802,6 +2996,9 @@ class Clipper:
                     reel_names.append(final_name)
                     reel_srcs[final_name] = row["item"]
                     self._log(f"  ✓  {final_name}  (compound clip)")
+                    # result was created by THIS run — register before any
+                    # guarded strip.
+                    self._register_run_created_tl(result)
                     if do_markers:
                         try:
                             row_tt = row.get("ttype", ttype) or "video"
@@ -2817,9 +3014,12 @@ class Clipper:
                             n_audio_before = int(result.GetTrackCount("audio") or 0)
                         except Exception:
                             n_audio_before = -1
-                        n_audio = self._strip_audio_tracks(result)
+                        n_audio = self._strip_audio_tracks_guarded(
+                            result, context=f"PATH B '{final_name}'")
                         self._log(f"    Video only — audio tracks before={n_audio_before} "
                                   f"removed={n_audio}")
+                        if self._run_audio_safety_tripped:
+                            self._abort_flag = True
                 else:
                     failed += 1
                     errors.append(final_name)
@@ -2948,6 +3148,9 @@ class Clipper:
                     pass
             return None
 
+        # reel was created by THIS run — register before any guarded strip.
+        self._register_run_created_tl(reel)
+
         # Appends land on the CURRENT timeline — switch and verify
         switched = False
         try:
@@ -3054,7 +3257,7 @@ class Clipper:
         # Video only cleanup on the reel itself (sources are already
         # stripped; this handles the reel's own default audio track)
         if self._video_only_var.get():
-            n_audio = self._strip_audio_tracks(reel)
+            n_audio = self._strip_audio_tracks_guarded(reel, context="Build Reel")
             self._log(f"  reel: Video only — removed {n_audio} audio track(s)")
 
         if _orig_tl:

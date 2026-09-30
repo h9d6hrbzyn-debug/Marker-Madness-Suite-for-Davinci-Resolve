@@ -1,4 +1,4 @@
-Clipper v1.5
+Clipper v1.5.1
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -8,6 +8,16 @@ Clipper turns your timeline markers into individual sub-clips or complete
 sequences in one click. Set in/out points with a marker pair, name your
 destination bin, and Clipper does the rest — with optional handle padding,
 timeline ordering prefixes, and multi-track support.
+
+WHAT'S NEW IN 1.5.1 (safety fix)
+- Video only could remove audio tracks from the wrong timeline in rare
+  cases; Clipper now verifies the target and stops if the original
+  timeline changes. Every audio-track strip is now refused unless the
+  target is confirmed to be a timeline Clipper created in that run, not
+  your original timeline, and currently selected in Resolve — and after
+  every strip, Clipper re-checks your original timeline's audio track
+  count and stops the whole run immediately (with an on-screen warning
+  to undo) if it ever finds it changed.
 
 WHAT'S NEW IN 1.5
 - Copy grade — Build reel gained a "Copy grade" checkbox (enabled only
@@ -46,7 +56,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Clipper 1.5.py" to:
+1. Copy "Clipper 1.5.1.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -56,7 +66,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Clipper 1.5
+   Workspace → Scripts → Utility → Clipper 1.5.1
 
 FULL DOCUMENTATION
    resolve-tools.com/clipper-guide
