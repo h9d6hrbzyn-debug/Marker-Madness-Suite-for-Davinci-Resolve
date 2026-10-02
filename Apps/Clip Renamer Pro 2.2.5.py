@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clip Renamer Pro 2.2.4 — DaVinci Resolve Clip & Timeline Renamer
+Clip Renamer Pro 2.2.5 — DaVinci Resolve Clip & Timeline Renamer
 
 Renames clips and/or timelines selected in the Resolve Media Pool bin.
 Part of the Marker Madness suite.
@@ -352,7 +352,9 @@ def apply_transform(text, *, find="", replace="", add="", add_pos="After",
                 n = cs + n
         else:
             n = n + cs
-            if add_pos == "After counter" and add:
+            # With "Replace entire name" the Add text IS the name, so it must
+            # not also land after the counter (2.2.4 gave Beach -> "Shot07Shot").
+            if add_pos == "After counter" and add and not replace_all:
                 n = n + add
     elif not replace_all and add_pos == "After counter" and add:
         # No counter in the name (switched off, or Digits is 0): "After counter"
@@ -442,7 +444,7 @@ class ClipRenamerPro:
         _tb.pack(fill="x")
         tk.Label(_tb, text="  Clip Renamer Pro", fg=ACCENT, bg=TITLE_BG,
                  font=("Avenir Next", 18)).pack(side="left")
-        tk.Label(_tb, text="v2.2.4", fg=DIM, bg=TITLE_BG,
+        tk.Label(_tb, text="v2.2.5", fg=DIM, bg=TITLE_BG,
                  font=("Avenir Next", 10)).pack(side="left", pady=(6, 0))
         _info = tk.Frame(_tb, bg=TITLE_BG)
         _info.pack(side="right", padx=12)
@@ -795,19 +797,43 @@ class ClipRenamerPro:
             return result
 
         tl_by_name = {}
+        tl_by_mpi_id = {}
+        name_count = {}
         tl_count = self._project.GetTimelineCount()
         for i in range(1, tl_count + 1):
             tl = self._project.GetTimelineByIndex(i)
             if tl:
-                tl_by_name[tl.GetName()] = tl
+                nm_tl = tl.GetName()
+                tl_by_name[nm_tl] = tl
+                name_count[nm_tl] = name_count.get(nm_tl, 0) + 1
+                # Timeline -> its Media Pool item's unique id. Guarded: older
+                # Resolve versions may lack GetMediaPoolItem / GetUniqueId.
+                try:
+                    tl_mpi = tl.GetMediaPoolItem()
+                    if tl_mpi is not None:
+                        tl_by_mpi_id[tl_mpi.GetUniqueId()] = tl
+                except Exception:
+                    pass
 
         for item in selected:
             props = item.GetClipProperty() or {}
             nm    = props.get("Clip Name", "") or item.GetName() or ""
             itype = props.get("Type", "")
-            if itype == "Timeline" or nm in tl_by_name:
+            try:
+                uid = item.GetUniqueId()
+            except Exception:
+                uid = None
+            # Only Type == "Timeline" makes a timeline. (2.2.4 also matched on
+            # name, so a clip named like a timeline got that timeline renamed.)
+            # The timeline object is found by unique id; by name only when the
+            # id isn't available and exactly one timeline has that name,
+            # otherwise None (rows with no object are skipped downstream).
+            if itype == "Timeline":
+                tl_obj = tl_by_mpi_id.get(uid) if uid is not None else None
+                if tl_obj is None and name_count.get(nm) == 1:
+                    tl_obj = tl_by_name.get(nm)
                 result["timelines"].append({
-                    "name": nm, "obj": tl_by_name.get(nm), "clip_obj": item})
+                    "name": nm, "obj": tl_obj, "clip_obj": item})
             else:
                 result["clips"].append({"name": nm, "obj": item})
         return result

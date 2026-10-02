@@ -1,4 +1,4 @@
-Clip Renamer Pro v2.2.4
+Clip Renamer Pro v2.2.5
 A DaVinci Resolve Script by Resolve Tools
 resolve-tools.com
 ──────────────────────────────────────────
@@ -7,6 +7,14 @@ WHAT IT DOES
 Clip Renamer Pro renames clips in your DaVinci Resolve Media Pool in
 bulk. Build a custom name from tokens — scene, take, camera, description,
 and more — preview the result before committing, and apply in one click.
+
+WHAT'S NEW IN 2.2.5
+- Fixed: a clip with the same name as a timeline could cause the timeline
+  to be renamed instead. Only items that really are timelines are now
+  treated as timelines.
+- Fixed: with Replace entire name and After counter, the added text could
+  appear twice. "Beach" with Add "Shot" and counter 07 now gives "Shot07"
+  instead of "Shot07Shot".
 
 WHAT'S NEW IN 2.2.4
 - Fixed: with the Counter on and placed before the name, "After counter"
@@ -86,7 +94,7 @@ REQUIREMENTS
 • macOS
 
 INSTALLATION
-1. Copy "Clip Renamer Pro 2.2.4.py" to:
+1. Copy "Clip Renamer Pro 2.2.5.py" to:
    ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/
    Fusion/Scripts/Utility/
 
@@ -96,7 +104,7 @@ INSTALLATION
 
 LAUNCH
 From the Resolve menu bar:
-   Workspace → Scripts → Utility → Clip Renamer Pro 2.2.4
+   Workspace → Scripts → Utility → Clip Renamer Pro 2.2.5
 
 FULL DOCUMENTATION
    resolve-tools.com/clip-renamer-pro-guide
