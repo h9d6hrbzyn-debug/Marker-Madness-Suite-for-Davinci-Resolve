@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clipper 1.5.1 — DaVinci Resolve Subclip Generator
+Clipper 1.5.2 — DaVinci Resolve Subclip Generator
 
 Creates a Media Pool subclip for every clip on a chosen video track
 in the current Resolve timeline. Part of the Marker Madness suite.
@@ -277,7 +277,7 @@ class Clipper:
     def __init__(self, root):
         self.root = root
         self.root.withdraw()
-        self.root.title("Clipper 1.5.1")
+        self.root.title("Clipper 1.5.2")
         self.root.configure(bg=BG)
         self.root.createcommand('::tk::mac::ShowHelp',
             lambda: webbrowser.open("https://resolve-tools.com/clipper-guide"))
@@ -481,7 +481,7 @@ class Clipper:
         name_row.pack(fill="x", padx=16, pady=(12, 0))
         tk.Label(name_row, text="✂  Clipper", fg=ACCENT, bg=PANEL,
                  font=("Avenir Next", 18, "bold")).pack(side="left")
-        tk.Label(name_row, text="v1.5.1", fg=DIM, bg=PANEL,
+        tk.Label(name_row, text="v1.5.2", fg=DIM, bg=PANEL,
                  font=F_SMALL).pack(side="left", padx=(4, 0), pady=(4, 0))
 
         # Float on top checkbox
@@ -2849,13 +2849,18 @@ class Clipper:
                     fb_info = [{"mediaPoolItem": mpi,
                                 "startFrame":   row["src_in"],
                                 "endFrame":     row["src_out"] + 1}]
-                    fb_attempts = [("excl+1", 0, do_video_only),
-                                   ("incl", -1, do_video_only)]
+                    # CreateTimelineFromClips treats endFrame as EXCLUSIVE
+                    # (measured on Resolve 21.1.1: 48..144 = 96 frames), and
+                    # row["src_out"] is the INCLUSIVE last frame — so the
+                    # exclusive endFrame is src_out + 1 (1.5.2 fix: this was
+                    # src_out + 0, one frame short on the tail handle).
+                    fb_attempts = [("excl", 1, do_video_only),
+                                   ("incl", 0, do_video_only)]
                     if do_video_only:
                         # mediaType undocumented for CreateTimelineFromClips —
                         # retry without it if rejected
-                        fb_attempts += [("excl+1 -mt", 0, False),
-                                        ("incl -mt", -1, False)]
+                        fb_attempts += [("excl -mt", 1, False),
+                                        ("incl -mt", 0, False)]
                     for tag, end_adj, use_mt in fb_attempts:
                         fb_info[0]["endFrame"] = row["src_out"] + end_adj
                         if use_mt:
