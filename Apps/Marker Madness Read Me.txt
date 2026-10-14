@@ -19,7 +19,7 @@ WHAT'S NEW IN 1.8.5
   Separator box is empty by default and is used exactly as typed. The
   preview shows a "Note After" column, it works with no rename
   operation active (notes only), and Undo/Redo restore the notes too.
-  (Requested by Tim Curran.)
+  (Requested by a user.)
 
 WHAT'S NEW IN 1.8.4
 - Batch Stamp remembers its settings. Track, color, name, note,
