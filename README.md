@@ -12,7 +12,7 @@ Five free scripting tools for DaVinci Resolve editors. No subscriptions, no nons
 
 ---
 
-### <img src="https://resolve-tools.com/images/icons/icon-marker-madness.png" width="28" style="vertical-align:middle;"> Marker Madness v1.8.4
+### <img src="https://resolve-tools.com/images/icons/icon-marker-madness.png" width="28" style="vertical-align:middle;"> Marker Madness v1.8.5
 *Because your markers deserve better than chaos.*
 
 You dropped a hundred markers across a timeline. Some are on clips, some are on the ruler, some are named, some aren't. You need to find the red ones, rename them all, nudge them two frames earlier, export a CSV with thumbnail frames, and do it before lunch.
@@ -25,7 +25,7 @@ Marker Madness puts every marker in your timeline — clip markers and timeline 
 
 **Edit Markers** — Double-click any marker to open a full editor: name, note, color, duration. Or right-click the Name or Note column to edit inline without opening a dialog at all.
 
-**Batch Rename** — Add a prefix, add a suffix, find and replace text across all selected markers, copy the clip name into the marker name, or copy the name into the note. Preview every change before committing. Undo with one click if you change your mind.
+**Batch Rename** — Add a prefix, add a suffix, find and replace text across all selected markers, copy the clip name into the marker name, copy the name into the note, or fold the final name into the existing note (before or after it, with your own separator, without wiping what is there). Preview every change before committing. Undo with one click if you change your mind.
 
 **Change Colors** — Select any number of markers and right-click the Color column to recolor them all at once.
 

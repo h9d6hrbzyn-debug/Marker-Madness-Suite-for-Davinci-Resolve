@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Marker Madness 1.8.4 — DaVinci Resolve Marker Manager
+Marker Madness 1.8.5 — DaVinci Resolve Marker Manager
 =====================================================
 A GUI tool to view, add, edit, delete, and export both timeline markers
 and clip-based markers in your current DaVinci Resolve timeline.
@@ -727,6 +727,27 @@ def _renamer_transform(text, *, find="", replace="", add="", add_pos="After",
     return n
 
 
+def _note_with_name(note, name, mode="Off", sep=""):
+    """1.8.5 -- fold a marker's (final) name into its note without wiping it.
+
+    mode "Before the note" -> name + sep + note
+    mode "After the note"  -> note + sep + name
+    An empty note becomes just the name. A note that already contains the name
+    (exact substring) is left alone, so applying twice never doubles it. The
+    separator is exactly what the user typed (default empty): the tools never
+    insert one for you.
+    """
+    note = note or ""
+    name = name or ""
+    if mode not in ("Before the note", "After the note") or not name:
+        return note
+    if name in note:
+        return note
+    if not note:
+        return name
+    return (name + sep + note) if mode == "Before the note" else (note + sep + name)
+
+
 # ---------------------------------------------------------------------------
 # Marker Renamer dialog
 # ---------------------------------------------------------------------------
@@ -988,6 +1009,32 @@ class MarkerRenamerDialog(tk.Toplevel):
         _cb(cg, "Title Case",    self._title_var, 1, 0)
         _cb(cg, "Remove digits", self._nodig_var, 1, 1)
 
+        # ── Name into note (1.8.5) ────────────────────────────────────────
+        nn = section(body, "NAME INTO NOTE")
+        nn_row = tk.Frame(nn, bg=DLG)
+        nn_row.pack(fill="x", padx=8, pady=6)
+        tk.Label(nn_row, text="Put name:", fg=DIM, bg=DLG,
+                 font=F_SMALL, anchor="w").pack(side="left")
+        self._nn_mode_var = tk.StringVar(value="Off")
+        ttk.Combobox(nn_row, textvariable=self._nn_mode_var,
+                     values=["Off", "Before the note", "After the note"],
+                     state="readonly", width=15,
+                     font=F_SMALL).pack(side="left", padx=(6, 12))
+        tk.Label(nn_row, text="Separator:", fg=DIM, bg=DLG,
+                 font=F_SMALL, anchor="w").pack(side="left")
+        self._nn_sep_var = tk.StringVar(value="")
+        tk.Entry(nn_row, textvariable=self._nn_sep_var, width=6,
+                 bg=FIELD, fg=TEXT, insertbackground=TEXT, relief="flat",
+                 font=F_MAIN, highlightthickness=1,
+                 highlightbackground=BTN_HOV).pack(side="left", padx=(6, 0))
+        self._nn_mode_var.trace_add("write", lambda *_: self._schedule_preview())
+        self._nn_sep_var.trace_add("write", lambda *_: self._schedule_preview())
+        tk.Label(nn, text="Adds the final marker name to the note; existing notes are kept. "
+                          "Separator is empty unless you type one.",
+                 fg=TEXT, bg=DLG, font=("Avenir Next", 11, "italic"),
+                 anchor="w", justify="left", wraplength=420).pack(
+                     fill="x", padx=8, pady=(0, 6))
+
         # ── Preview ───────────────────────────────────────────────────────
         pf = section(body, "PREVIEW")
 
@@ -1005,7 +1052,7 @@ class MarkerRenamerDialog(tk.Toplevel):
         pf_inner = tk.Frame(pf, bg=DLG)
         pf_inner.pack(fill="both", expand=True, padx=8, pady=6)
 
-        self._preview_tree = ttk.Treeview(pf_inner, columns=("before", "after"),
+        self._preview_tree = ttk.Treeview(pf_inner, columns=("before", "after", "note"),
                                            show="headings", height=8,
                                            style="Renamer.Treeview",
                                            selectmode="none")
@@ -1013,6 +1060,9 @@ class MarkerRenamerDialog(tk.Toplevel):
         self._preview_tree.heading("after",  text="After")
         self._preview_tree.column("before", width=200, anchor="w")
         self._preview_tree.column("after",  width=200, anchor="w")
+        self._preview_tree.heading("note",  text="Note After")
+        self._preview_tree.column("note",   width=220, anchor="w")
+        self._preview_tree.configure(displaycolumns=("before", "after"))
 
         vsb = ttk.Scrollbar(pf_inner, orient="vertical",
                              command=self._preview_tree.yview)
@@ -1164,6 +1214,12 @@ class MarkerRenamerDialog(tk.Toplevel):
         # 1.6: was start × step, which made "Start: 1" produce 010. A field
         # labelled Start has to be the number you start at.
         counter = self._ctr_start_var.get()
+        nn_mode = self._nn_mode_var.get()
+        nn_sep  = self._nn_sep_var.get()
+        nn_on   = nn_mode != "Off"
+        # Third column only when Name into note is active.
+        self._preview_tree.configure(
+            displaycolumns=("before", "after", "note") if nn_on else ("before", "after"))
 
         for rec in targets:
             p = self._get_params(counter)
@@ -1180,8 +1236,21 @@ class MarkerRenamerDialog(tk.Toplevel):
                 after  = _renamer_transform(before, **p)
                 label  = before
 
-            tag = "changed" if after != before else "same"
-            self._preview_tree.insert("", "end", values=(label, after), tags=(tag,))
+            # 1.8.5 Name into note: show the note that will result, using the
+            # FINAL name (after this apply's own name operations).
+            note_after = ""
+            if nn_on:
+                fin_name = _renamer_transform(rec["name"], **p) if field in ("name", "both") else rec["name"]
+                cur_note = _renamer_transform(rec["note"], **p) if field in ("note", "both") else rec["note"]
+                note_after = _note_with_name(cur_note, fin_name, nn_mode, nn_sep)
+                if note_after != rec["note"]:
+                    changed_row = True
+                else:
+                    changed_row = False
+            else:
+                changed_row = False
+            tag = "changed" if (after != before or changed_row) else "same"
+            self._preview_tree.insert("", "end", values=(label, after, note_after), tags=(tag,))
             if self._counter_var.get():
                 counter += self._ctr_step_var.get()
 
@@ -1277,6 +1346,8 @@ class MarkerRenamerDialog(tk.Toplevel):
             p        = self._get_params(counter)
             new_name = _renamer_transform(rec["name"], **p) if field in ("name", "both") else rec["name"]
             new_note = _renamer_transform(rec["note"], **p) if field in ("note", "both") else rec["note"]
+            new_note = _note_with_name(new_note, new_name,
+                                       self._nn_mode_var.get(), self._nn_sep_var.get())
 
             if new_name == rec["name"] and new_note == rec["note"]:
                 if self._counter_var.get():
@@ -1389,6 +1460,8 @@ class MarkerRenamerDialog(tk.Toplevel):
         self._lower_var.set(False)
         self._title_var.set(False)
         self._nodig_var.set(False)
+        self._nn_mode_var.set("Off")
+        self._nn_sep_var.set("")
         self._schedule_preview()
 
 
@@ -5008,7 +5081,7 @@ def _flow_reflow(row, avail_w):
 # ---------------------------------------------------------------------------
 
 APP_TITLE   = "Marker Madness"
-APP_VERSION = "1.8.4"
+APP_VERSION = "1.8.5"
 
 class MarkerMadness:
     def __init__(self, root: tk.Tk):
