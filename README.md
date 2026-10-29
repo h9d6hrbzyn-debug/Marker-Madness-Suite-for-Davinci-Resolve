@@ -208,3 +208,5 @@ Download the `.app` (macOS) or `.exe` (Windows) from [resolve-tools.com](https:/
 ---
 
 *Free to use and share. Built with love for editors.*
+
+© 2026 Resolve Tools. Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE): free to use, modify and share for any noncommercial purpose; not to be sold or repackaged as a paid product.
