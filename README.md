@@ -1,10 +1,16 @@
 ![Marker Madness Suite](banner.svg)
 
+> [!IMPORTANT]
+> **This is Resolve Tools Classic (1.x), for DaVinci Resolve 21.0 and earlier.**
+> These scripts are frozen at their final versions (Marker Madness 1.8.5, October 2026). They stay here, free, for anyone on the free version of Resolve or on Resolve 21.0 and earlier.
+>
+> **On DaVinci Resolve Studio 21.1 or later?** Get **Resolve Tools 2.0**, the all-in-one app for Mac and Windows, at **[resolve-tools.com](https://resolve-tools.com)**. (Resolve 21.1 made scripting a Studio-only feature, which is why there are two versions.)
+
 ---
 
-Five free scripting tools for DaVinci Resolve editors. No subscriptions, no nonsense, no install wizard. Drop them in your scripts folder and get to work. **Works with DaVinci Resolve 18+ — free version and Studio both fully supported.**
+Five free scripting tools for DaVinci Resolve editors. No subscriptions, no nonsense, no install wizard. Drop them in your scripts folder and get to work. **Works with DaVinci Resolve 18 through 21.0 — free version and Studio both fully supported.**
 
-**[resolve-tools.com](https://resolve-tools.com)** — screenshots, guides, and downloads for every tool.
+**[resolve-tools.com/classic](https://resolve-tools.com/classic/)** — screenshots, guides, and downloads for every classic tool.
 
 ---
 
@@ -185,7 +191,7 @@ Download the `.app` (macOS) or `.exe` (Windows) from [resolve-tools.com](https:/
 3. Launch DaVinci Resolve
 4. Run any tool from **Workspace → Scripts → Utility**
 
-**Requirements:** DaVinci Resolve 18+ (free version and Studio both fully supported) and **Python 3** — Resolve only runs `.py` scripts if Python 3 is installed on your machine. Download the free installer from [python.org/downloads](https://www.python.org/downloads/), or if you'd rather get it through Resolve directly, open the Resolve console (**Workspace → Console**) — when Python isn't detected, Resolve shows a link to the same Python 3 download. No external Python packages needed beyond that — the tools use only what ships with Python.
+**Requirements:** DaVinci Resolve 18 through 21.0 (free version and Studio both fully supported) and **Python 3** — Resolve only runs `.py` scripts if Python 3 is installed on your machine. Download the free installer from [python.org/downloads](https://www.python.org/downloads/), or if you'd rather get it through Resolve directly, open the Resolve console (**Workspace → Console**) — when Python isn't detected, Resolve shows a link to the same Python 3 download. No external Python packages needed beyond that — the tools use only what ships with Python.
 
 ---
 
